@@ -1,0 +1,125 @@
+'use client';
+
+import { useState, useEffect, useMemo } from 'react';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { Card } from '@/components/ui/card';
+import { generateWorld, updateWorld } from '@/lib/actions/world.actions';
+import { VersionHistory } from '@/components/project/version-history';
+import { OnlineUsers } from '@/components/project/online-users';
+import { useSocket } from '@/lib/socket/client';
+import { SparklesIcon } from 'lucide-react';
+
+interface WorldEditorProps {
+  projectId: string;
+  initialWorld?: string;
+}
+
+export function WorldEditor({ projectId, initialWorld }: WorldEditorProps) {
+  const [content, setContent] = useState(initialWorld || '');
+  const [prompt, setPrompt] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  // 生成稳定的用户ID（仅在组件挂载时生成一次）
+  const userId = useMemo(
+    () => 'demo-user-' + Math.random().toString(36).substring(7),
+    []
+  );
+
+  // Socket.IO实时协作
+  const { isConnected, onlineUsers, emit, on, off } = useSocket(
+    projectId,
+    userId,
+    '访客用户'
+  );
+
+  // 监听其他用户的更新
+  useEffect(() => {
+    const handlePatch = (data: any) => {
+      if (data.module === 'world') {
+        console.log('Received world update from user:', data.userId);
+        setContent(data.delta);
+      }
+    };
+
+    on('project:patch', handlePatch);
+
+    return () => {
+      off('project:patch', handlePatch);
+    };
+  }, [on, off]);
+
+  const handleGenerate = async () => {
+    if (!prompt) return;
+    setIsGenerating(true);
+    try {
+      const result = await generateWorld(projectId, prompt);
+      if (result.success && result.data) {
+        setContent(result.data);
+      }
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleSave = async () => {
+    await updateWorld(projectId, content);
+
+    // 广播更新给其他用户
+    emit('project:update', {
+      projectId,
+      module: 'world',
+      delta: content,
+      version: Date.now(),
+      userId: 'demo-user',
+    });
+  };
+
+  return (
+    <div className="grid grid-cols-4 gap-4">
+      <div className="col-span-3 space-y-4">
+        <Card className="p-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">AI 生成</label>
+            <div className="flex gap-2">
+              <Textarea
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder="描述你想要的世界观,例如: 创建一个赛博朋克风格的未来都市..."
+                rows={3}
+              />
+              <Button onClick={handleGenerate} disabled={isGenerating}>
+                <SparklesIcon className="h-4 w-4 mr-2" />
+                {isGenerating ? '生成中...' : '生成'}
+              </Button>
+            </div>
+          </div>
+        </Card>
+
+        <Card className="p-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">世界观内容</label>
+            <Textarea
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              placeholder="世界观内容将在这里显示..."
+              rows={20}
+              className="font-mono"
+            />
+            <Button onClick={handleSave} variant="outline">
+              保存
+            </Button>
+          </div>
+        </Card>
+      </div>
+
+      <div className="col-span-1 space-y-4">
+        <OnlineUsers users={onlineUsers} isConnected={isConnected} />
+        <VersionHistory
+          projectId={projectId}
+          onRestore={() => window.location.reload()}
+        />
+      </div>
+    </div>
+  );
+}
