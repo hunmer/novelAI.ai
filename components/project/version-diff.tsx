@@ -5,7 +5,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { compareVersions } from '@/lib/actions/version.actions';
 import * as jsondiffpatch from 'jsondiffpatch';
-import 'jsondiffpatch/dist/formatters-styles/html.css';
+import 'jsondiffpatch/formatters/styles/html.css';
 
 interface VersionDiffProps {
   versionId1: string;

@@ -5,10 +5,9 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card } from '@/components/ui/card';
 import { generateWorld, updateWorld } from '@/lib/actions/world.actions';
-import { VersionHistory } from '@/components/project/version-history';
-import { OnlineUsers } from '@/components/project/online-users';
+import { WorldVersionRollback } from '@/components/project/world-version-rollback';
 import { useSocket } from '@/lib/socket/client';
-import { SparklesIcon } from 'lucide-react';
+import { SparklesIcon, RefreshCw } from 'lucide-react';
 
 interface WorldEditorProps {
   projectId: string;
@@ -18,7 +17,10 @@ interface WorldEditorProps {
 export function WorldEditor({ projectId, initialWorld }: WorldEditorProps) {
   const [content, setContent] = useState(initialWorld || '');
   const [prompt, setPrompt] = useState('');
+  const [refinementPrompt, setRefinementPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isRefining, setIsRefining] = useState(false);
+  const [generatedContent, setGeneratedContent] = useState('');
 
   // 生成稳定的用户ID（仅在组件挂载时生成一次）
   const userId = useMemo(
@@ -27,7 +29,7 @@ export function WorldEditor({ projectId, initialWorld }: WorldEditorProps) {
   );
 
   // Socket.IO实时协作
-  const { isConnected, onlineUsers, emit, on, off } = useSocket(
+  const { emit, on, off } = useSocket(
     projectId,
     userId,
     '访客用户'
@@ -55,10 +57,26 @@ export function WorldEditor({ projectId, initialWorld }: WorldEditorProps) {
     try {
       const result = await generateWorld(projectId, prompt);
       if (result.success && result.data) {
+        setGeneratedContent(result.data);
         setContent(result.data);
       }
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const handleRefine = async () => {
+    if (!refinementPrompt || !generatedContent) return;
+    setIsRefining(true);
+    try {
+      const combinedPrompt = `基于以下世界观内容进行改进：\n\n${generatedContent}\n\n改进要求：${refinementPrompt}`;
+      const result = await generateWorld(projectId, combinedPrompt);
+      if (result.success && result.data) {
+        setGeneratedContent(result.data);
+        setContent(result.data);
+      }
+    } finally {
+      setIsRefining(false);
     }
   };
 
@@ -79,20 +97,40 @@ export function WorldEditor({ projectId, initialWorld }: WorldEditorProps) {
     <div className="grid grid-cols-4 gap-4">
       <div className="col-span-3 space-y-4">
         <Card className="p-4">
-          <div className="space-y-2">
-            <label className="text-sm font-medium">AI 生成</label>
-            <div className="flex gap-2">
-              <Textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder="描述你想要的世界观,例如: 创建一个赛博朋克风格的未来都市..."
-                rows={3}
-              />
-              <Button onClick={handleGenerate} disabled={isGenerating}>
-                <SparklesIcon className="h-4 w-4 mr-2" />
-                {isGenerating ? '生成中...' : '生成'}
-              </Button>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">AI 生成世界观</label>
+              <div className="flex gap-2">
+                <Textarea
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  placeholder="描述你想要的世界观,例如: 创建一个赛博朋克风格的未来都市..."
+                  rows={3}
+                />
+                <Button onClick={handleGenerate} disabled={isGenerating}>
+                  <SparklesIcon className="h-4 w-4 mr-2" />
+                  {isGenerating ? '生成中...' : '生成'}
+                </Button>
+              </div>
             </div>
+
+            {generatedContent && (
+              <div className="space-y-2 pt-4 border-t">
+                <label className="text-sm font-medium">改进世界观</label>
+                <div className="flex gap-2">
+                  <Textarea
+                    value={refinementPrompt}
+                    onChange={(e) => setRefinementPrompt(e.target.value)}
+                    placeholder="描述你想要的改进，例如: 增加更多科技元素，添加政治派系..."
+                    rows={2}
+                  />
+                  <Button onClick={handleRefine} disabled={isRefining} variant="secondary">
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    {isRefining ? '改进中...' : '改进'}
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </Card>
 
@@ -114,9 +152,9 @@ export function WorldEditor({ projectId, initialWorld }: WorldEditorProps) {
       </div>
 
       <div className="col-span-1 space-y-4">
-        <OnlineUsers users={onlineUsers} isConnected={isConnected} />
-        <VersionHistory
+        <WorldVersionRollback
           projectId={projectId}
+          currentContent={content}
           onRestore={() => window.location.reload()}
         />
       </div>

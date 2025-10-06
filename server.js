@@ -19,11 +19,11 @@ app.prepare().then(async () => {
       const parsedUrl = parse(req.url, true);
 
       // 记录请求
-      await logger.debug(`${req.method} ${req.url}`, 'http', {
-        method: req.method,
-        url: req.url,
-        headers: req.headers,
-      });
+      // await logger.debug(`${req.method} ${req.url}`, 'http', {
+      //   method: req.method,
+      //   url: req.url,
+      //   headers: req.headers,
+      // });
 
       await handle(req, res, parsedUrl);
     } catch (err) {

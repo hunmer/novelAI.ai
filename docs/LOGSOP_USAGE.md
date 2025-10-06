@@ -19,6 +19,12 @@ LOGSOP_SERVER="http://localhost:8832"
 LOGSOP_TRANSPORT="websocket"
 ```
 
+**重要特性**:
+- **延迟初始化**: 第一次调用日志方法时自动读取环境变量并初始化连接
+- **日志队列**: 初始化前的日志会暂存到队列,连接成功后批量发送
+- **自动回退**: 连接失败时自动使用标准 console 输出,不会报错或丢失日志
+- **WebSocket 等待**: WebSocket 传输会等待最多 3 秒建立连接,超时自动回退
+
 ## 启动 LogsOP 服务器
 
 在启动应用之前,需要先启动 LogsOP 服务器:
@@ -47,7 +53,29 @@ npm run dev
 
 **日志前缀**: `server`, `http`
 
-### 2. API 路由 (/app/api/ai/world/route.ts)
+### 2. AI 客户端 (lib/ai/client.ts)
+
+- **AI 生成请求**: 记录每次 AI 生成的详细信息
+  - 请求类型、模型配置、输入长度
+  - Token 使用量和成本统计
+  - 重试机制和错误处理
+- **流式生成**: 记录流式生成的启动和状态
+- **日志片段追踪**: 完整追踪从请求到响应的全过程
+
+**日志前缀**: `ai-client`
+
+**日志片段示例**:
+- `ai-generate-{type}-{timestamp}`: 普通生成
+- `ai-stream-{type}-{timestamp}`: 流式生成
+
+**记录的关键指标**:
+- 输入长度
+- Token 使用量
+- API 成本
+- 重试次数
+- 错误信息
+
+### 3. API 路由 (/app/api/ai/world/route.ts)
 
 - **世界观生成**: 使用日志片段追踪整个生成流程
   - 开始生成
@@ -58,7 +86,7 @@ npm run dev
 
 **日志片段**: 每次世界观生成请求会创建独立的日志片段,便于追踪完整流程。
 
-### 3. Socket.IO 服务 (lib/socket/server.js)
+### 4. Socket.IO 服务 (lib/socket/server.js)
 
 - **客户端连接/断开**: 记录 WebSocket 连接状态
 - **用户加入房间**: 记录用户加入项目房间
@@ -73,11 +101,31 @@ npm run dev
 ```typescript
 import { logger } from '@/lib/logger/client';
 
-// 基本日志
-await logger.info('操作成功', 'prefix', { userId: 123 });
+// 基本日志 (无 metadata 时发送普通文本)
+await logger.info('操作成功', 'prefix');
 await logger.warn('警告信息', 'prefix');
-await logger.error('错误信息', 'prefix', { error: err.message });
+await logger.error('错误信息', 'prefix');
 await logger.debug('调试信息', 'prefix');
+
+// 带 metadata 的日志 (自动发送 JSON 格式)
+await logger.info('用户登录', 'auth', { userId: 123 });
+await logger.error('错误信息', 'prefix', { error: err.message });
+
+// 定时任务进度追踪 (自动发送 JSON 格式)
+await logger.info('定时任务执行', 'cron-interval', {
+  index: 1,
+  total: 10,
+  data: { count: 1, format: 'json' }
+});
+
+// JSON 格式发送的内容会被格式化为:
+// {
+//   "message": "定时任务执行",
+//   "timestamp": "2025-01-06T10:30:00.000Z",
+//   "index": 1,
+//   "total": 10,
+//   "data": { "count": 1, "format": "json" }
+// }
 
 // 使用日志片段追踪业务流程
 const snippetId = logger.startSnippet({
@@ -95,11 +143,22 @@ await logger.endSnippet(snippetId!);
 ```javascript
 const { logger } = require('@/lib/logger/server');
 
-// 基本日志
-await logger.info('操作成功', 'prefix', { userId: 123 });
+// 基本日志 (无 metadata 时发送普通文本)
+await logger.info('操作成功', 'prefix');
 await logger.warn('警告信息', 'prefix');
-await logger.error('错误信息', 'prefix', { error: err.message });
+await logger.error('错误信息', 'prefix');
 await logger.debug('调试信息', 'prefix');
+
+// 带 metadata 的日志 (自动发送 JSON 格式)
+await logger.info('用户登录', 'auth', { userId: 123 });
+await logger.error('错误信息', 'prefix', { error: err.message });
+
+// 定时任务进度追踪 (自动发送 JSON 格式)
+await logger.info('定时任务执行', 'cron-interval', {
+  index: 1,
+  total: 10,
+  data: { count: 1, format: 'json' }
+});
 
 // 使用日志片段
 const snippetId = logger.startSnippet({
@@ -155,8 +214,22 @@ await logger.endSnippet(snippetId);
 
 ### WebSocket 连接失败
 
-- 尝试切换为 HTTP 传输: `LOGSOP_TRANSPORT="http"`
+**不用担心!** 系统会自动处理:
+- WebSocket 连接失败时,会自动回退到 console 输出
+- 所有日志都会保留,不会丢失
+- 控制台会显示警告信息: `[LogsOP] 连接超时,将使用 console 输出`
+
+如需主动切换:
+- 使用 HTTP 传输: `LOGSOP_TRANSPORT="http"` (更稳定但略慢)
 - 检查防火墙设置
+
+### 连接行为说明
+
+1. **初始化阶段**: 第一次调用日志方法时触发初始化
+2. **队列缓存**: 初始化期间的日志暂存到队列
+3. **连接等待**: WebSocket 最多等待 3 秒建立连接
+4. **成功**: 发送队列中的所有日志
+5. **失败**: 将队列日志输出到 console,后续日志也使用 console
 
 ## 扩展使用
 
@@ -179,6 +252,48 @@ await logger.info('用户登录', 'auth', {
   timestamp: Date.now()
 });
 ```
+
+### 自动 JSON 格式日志
+
+当传入 `metadata` 参数时,日志会自动以 JSON 格式发送:
+
+```typescript
+// 场景:定时发送间隔日志
+await logger.info('定时任务', 'task-interval', {
+  index: currentIndex + 1,
+  total: totalCount,
+  data: {
+    count: currentIndex + 1,
+    format: 'json'
+  }
+});  // 有 metadata 参数会自动发送 JSON 格式
+```
+
+**JSON 格式日志特点:**
+
+1. **自动触发**: 只要有 `metadata` 参数,就会自动发送 JSON 格式
+2. **自动结构化**: 自动将 `message` 和 `metadata` 整合为 JSON 对象
+3. **时间戳自动添加**: 自动包含 ISO 8601 格式的时间戳
+4. **易于解析**: 在 LogsOP 服务端可以更方便地解析和处理
+
+**格式对比:**
+
+```typescript
+// 无 metadata - 发送普通文本
+await logger.info('用户访问', 'user');
+// 发送: text: "用户访问"
+
+// 有 metadata - 自动发送 JSON 格式
+await logger.info('用户访问', 'user', { userId: 123 });
+// 发送: text: '{"message":"用户访问","timestamp":"2025-01-06T10:30:00.000Z","userId":123}'
+```
+
+**适用场景:**
+
+- 定时任务/循环任务的进度追踪
+- 需要携带复杂数据结构的日志
+- 需要在服务端进行日志聚合分析的场景
+- 与其他系统集成时需要标准化数据格式
 
 ## 参考资料
 

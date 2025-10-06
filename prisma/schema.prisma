@@ -103,3 +103,20 @@ model KnowledgeBase {
 
   @@index([projectId])
 }
+
+model ModelProvider {
+  id          String   @id @default(cuid())
+  name        String
+  type        String   // 'openai', 'anthropic', 'custom'
+  apiKey      String
+  baseUrl     String?  // 自定义API端点
+  models      String   // JSON数组存储可用模型
+  isDefault   Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  metadata    String   @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isDefault])
+  @@index([isActive])
+}

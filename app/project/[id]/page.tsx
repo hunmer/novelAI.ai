@@ -1,6 +1,7 @@
 import { getProjectById } from '@/lib/actions/project.actions';
 import { WorldEditor } from '@/components/editors/world-editor';
 import { CharacterEditor } from '@/components/editors/character-editor';
+import { ProjectHeaderWrapper } from '@/components/project/project-header-wrapper';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export default async function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
@@ -12,20 +13,22 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   }
 
   return (
-    <div className="container py-6">
-      <h1 className="text-3xl font-bold mb-6">{project.name}</h1>
-      <Tabs defaultValue="world">
-        <TabsList>
-          <TabsTrigger value="world">世界观</TabsTrigger>
-          <TabsTrigger value="characters">角色</TabsTrigger>
-        </TabsList>
-        <TabsContent value="world">
-          <WorldEditor projectId={project.id} initialWorld={project.world || ''} />
-        </TabsContent>
-        <TabsContent value="characters">
-          <CharacterEditor projectId={project.id} worldContext={project.world || ''} />
-        </TabsContent>
-      </Tabs>
-    </div>
+    <>
+      <ProjectHeaderWrapper projectId={project.id} projectName={project.name} />
+      <div className="container py-6">
+        <Tabs defaultValue="world">
+          <TabsList className="mb-6">
+            <TabsTrigger value="world">世界观</TabsTrigger>
+            <TabsTrigger value="characters">角色</TabsTrigger>
+          </TabsList>
+          <TabsContent value="world">
+            <WorldEditor projectId={project.id} initialWorld={project.world || ''} />
+          </TabsContent>
+          <TabsContent value="characters">
+            <CharacterEditor projectId={project.id} worldContext={project.world || ''} />
+          </TabsContent>
+        </Tabs>
+      </div>
+    </>
   );
 }
