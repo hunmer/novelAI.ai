@@ -3,8 +3,9 @@ import { WorldEditor } from '@/components/editors/world-editor';
 import { CharacterEditor } from '@/components/editors/character-editor';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-export default async function ProjectPage({ params }: { params: { id: string } }) {
-  const project = await getProjectById(params.id);
+export default async function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const project = await getProjectById(id);
 
   if (!project) {
     return <div>项目不存在</div>;
