@@ -1,11 +1,3 @@
-非常好 👍
-你希望把之前的架构（Web + Server 分离 + socket 通讯）改为一个更现代、更简洁的 **一体化架构**，即：
-👉 使用 **Next.js (App Router + Server Components)** 实现全栈，
-👉 使用 **shadcn/ui** 做前端 UI 框架，
-👉 不再前后端分离，而是通过 **Next.js API Routes / Server Actions** 实现业务逻辑、AI 调用与数据库交互。
-
-下面是完整修正版的 PRD 文档，我会帮你重构成 **Next.js 一体化开发架构方案** 的 Markdown 文档风格。
-（最后我也可以帮你导出成 `.zip` 文件，和之前一样。）
 
 ---
 
