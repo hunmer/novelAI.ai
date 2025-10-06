@@ -28,6 +28,7 @@ export function ProjectHeaderWrapper({ projectId, projectName }: ProjectHeaderWr
 
   return (
     <ProjectHeader
+      projectId={projectId}
       projectName={projectName}
       onlineUsers={onlineUsers}
       isConnected={isConnected}

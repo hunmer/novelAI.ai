@@ -166,12 +166,12 @@ export function WorldVersionRollback({
                       <p className="text-muted-foreground">内容预览:</p>
                       <div className="bg-muted/50 p-2 rounded-md max-h-32 overflow-y-auto">
                         <pre className="text-xs whitespace-pre-wrap break-words">
-                          {version.content.substring(0, 300)}
-                          {version.content.length > 300 && '...'}
+                          {version.content?.substring(0, 300) || '无内容'}
+                          {(version.content?.length || 0) > 300 && '...'}
                         </pre>
                       </div>
                       <p className="text-muted-foreground pt-1">
-                        字数: {version.content.length} 字符
+                        字数: {version.content?.length || 0} 字符
                       </p>
                     </div>
                   </div>
@@ -197,7 +197,7 @@ export function WorldVersionRollback({
             </div>
             <div className="flex-1 overflow-y-auto p-4">
               <VersionDiff
-                oldContent={selectedVersion.content}
+                oldContent={selectedVersion.content || ''}
                 newContent={currentContent}
                 oldLabel={`版本 ${new Date(selectedVersion.createdAt).toLocaleString('zh-CN')}`}
                 newLabel="当前版本"

@@ -17,7 +17,7 @@ const Markdown = React.forwardRef<HTMLDivElement, MarkdownProps>(
       <div
         ref={ref}
         className={cn(
-          "w-full rounded-md border border-input bg-background px-3 py-2 text-base prose prose-sm dark:prose-invert max-w-none overflow-auto",
+          "markdown-content w-full rounded-md border border-input bg-background px-3 py-2 text-base prose prose-sm dark:prose-invert max-w-none overflow-auto break-words",
           className
         )}
       >

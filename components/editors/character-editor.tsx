@@ -4,15 +4,16 @@ import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { MarkdownEditor } from '@/components/ui/markdown-editor';
 import { Card } from '@/components/ui/card';
 import {
-  generateCharacter,
   getCharacters,
   updateCharacter,
   deleteCharacter,
 } from '@/lib/actions/character.actions';
 import { SparklesIcon, PlusIcon, TrashIcon } from 'lucide-react';
 import type { Character } from '@prisma/client';
+import { Typewriter } from '@/components/ui/typewriter';
 
 interface CharacterEditorProps {
   projectId: string;
@@ -24,6 +25,8 @@ export function CharacterEditor({ projectId, worldContext }: CharacterEditorProp
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [streamingContent, setStreamingContent] = useState('');
+  const [isStreaming, setIsStreaming] = useState(false);
 
   useEffect(() => {
     loadCharacters();
@@ -37,14 +40,49 @@ export function CharacterEditor({ projectId, worldContext }: CharacterEditorProp
   const handleGenerate = async () => {
     if (!prompt) return;
     setIsGenerating(true);
+    setIsStreaming(true);
+    setStreamingContent('');
+
     try {
-      const result = await generateCharacter(projectId, prompt, worldContext);
-      if (result.success) {
+      const response = await fetch('/api/ai/character', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, worldContext }),
+      });
+
+      if (!response.ok) throw new Error('Generation failed');
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let fullText = '';
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value);
+          fullText += chunk;
+          setStreamingContent(fullText);
+        }
+
+        // 创建新角色
+        const newChar = await fetch(`/api/characters`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId,
+            name: 'AI生成角色',
+            attributes: fullText,
+          }),
+        }).then(res => res.json());
+
         await loadCharacters();
-        setSelectedId(result.data.id);
+        setSelectedId(newChar.id);
       }
     } finally {
       setIsGenerating(false);
+      setIsStreaming(false);
     }
   };
 
@@ -108,17 +146,23 @@ export function CharacterEditor({ projectId, worldContext }: CharacterEditorProp
       </div>
 
       <div className="col-span-2">
-        {selected ? (
+        {isStreaming ? (
+          <Card className="p-4 space-y-4">
+            <div className="text-sm font-medium">正在生成角色...</div>
+            <div className="border rounded-md p-4 min-h-[500px] bg-background">
+              <Typewriter text={streamingContent} typeSpeed={20} />
+            </div>
+          </Card>
+        ) : selected ? (
           <Card className="p-4 space-y-4">
             <Input
               value={selected.name}
               onChange={(e) => handleUpdate(selected.id, { name: e.target.value })}
             />
-            <Textarea
+            <MarkdownEditor
               value={selected.attributes}
-              onChange={(e) => handleUpdate(selected.id, { attributes: e.target.value })}
+              onChange={(value) => handleUpdate(selected.id, { attributes: value })}
               rows={20}
-              className="font-mono"
             />
           </Card>
         ) : (

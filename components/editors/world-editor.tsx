@@ -3,11 +3,26 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { MarkdownEditor } from '@/components/ui/markdown-editor';
 import { Card } from '@/components/ui/card';
-import { generateWorld, updateWorld } from '@/lib/actions/world.actions';
+import { updateWorld } from '@/lib/actions/world.actions';
 import { WorldVersionRollback } from '@/components/project/world-version-rollback';
 import { useSocket } from '@/lib/socket/client';
 import { SparklesIcon, RefreshCw } from 'lucide-react';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Typewriter } from '@/components/ui/typewriter';
+
+interface Prompt {
+  id: string;
+  name: string;
+  content: string;
+}
 
 interface WorldEditorProps {
   projectId: string;
@@ -21,6 +36,10 @@ export function WorldEditor({ projectId, initialWorld }: WorldEditorProps) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRefining, setIsRefining] = useState(false);
   const [generatedContent, setGeneratedContent] = useState('');
+  const [streamingContent, setStreamingContent] = useState('');
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [prompts, setPrompts] = useState<Prompt[]>([]);
+  const [selectedPromptId, setSelectedPromptId] = useState<string>('');
 
   // 生成稳定的用户ID（仅在组件挂载时生成一次）
   const userId = useMemo(
@@ -34,6 +53,20 @@ export function WorldEditor({ projectId, initialWorld }: WorldEditorProps) {
     userId,
     '访客用户'
   );
+
+  // 加载提示词列表
+  useEffect(() => {
+    const fetchPrompts = async () => {
+      try {
+        const res = await fetch(`/api/prompts?projectId=${projectId}&type=world`);
+        const data = await res.json();
+        setPrompts(data.prompts || []);
+      } catch (error) {
+        console.error('获取提示词失败:', error);
+      }
+    };
+    fetchPrompts();
+  }, [projectId]);
 
   // 监听其他用户的更新
   useEffect(() => {
@@ -52,31 +85,97 @@ export function WorldEditor({ projectId, initialWorld }: WorldEditorProps) {
   }, [on, off]);
 
   const handleGenerate = async () => {
-    if (!prompt) return;
+    if (!prompt && !selectedPromptId) return;
     setIsGenerating(true);
+    setIsStreaming(true);
+    setStreamingContent('');
+
     try {
-      const result = await generateWorld(projectId, prompt);
-      if (result.success && result.data) {
-        setGeneratedContent(result.data);
-        setContent(result.data);
+      // 如果选择了预设提示词，使用预设提示词内容
+      let finalPrompt = prompt;
+      if (selectedPromptId) {
+        const selectedPrompt = prompts.find((p) => p.id === selectedPromptId);
+        if (selectedPrompt) {
+          finalPrompt = prompt
+            ? `${selectedPrompt.content}\n\n${prompt}`
+            : selectedPrompt.content;
+        }
+      }
+
+      const response = await fetch('/api/ai/world', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: finalPrompt }),
+      });
+
+      if (!response.ok) throw new Error('Generation failed');
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let fullText = '';
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value);
+          fullText += chunk;
+          setStreamingContent(fullText);
+        }
+
+        setGeneratedContent(fullText);
+        setContent(fullText);
+
+        // 保存生成的内容
+        await updateWorld(projectId, fullText);
       }
     } finally {
       setIsGenerating(false);
+      setIsStreaming(false);
     }
   };
 
   const handleRefine = async () => {
     if (!refinementPrompt || !generatedContent) return;
     setIsRefining(true);
+    setIsStreaming(true);
+    setStreamingContent('');
+
     try {
       const combinedPrompt = `基于以下世界观内容进行改进：\n\n${generatedContent}\n\n改进要求：${refinementPrompt}`;
-      const result = await generateWorld(projectId, combinedPrompt);
-      if (result.success && result.data) {
-        setGeneratedContent(result.data);
-        setContent(result.data);
+
+      const response = await fetch('/api/ai/world', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: combinedPrompt }),
+      });
+
+      if (!response.ok) throw new Error('Refinement failed');
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let fullText = '';
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value);
+          fullText += chunk;
+          setStreamingContent(fullText);
+        }
+
+        setGeneratedContent(fullText);
+        setContent(fullText);
+
+        // 保存改进的内容
+        await updateWorld(projectId, fullText);
       }
     } finally {
       setIsRefining(false);
+      setIsStreaming(false);
     }
   };
 
@@ -100,17 +199,35 @@ export function WorldEditor({ projectId, initialWorld }: WorldEditorProps) {
           <div className="space-y-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">AI 生成世界观</label>
-              <div className="flex gap-2">
+              <div className="space-y-3">
+                <Select value={selectedPromptId || 'none'} onValueChange={(value) => setSelectedPromptId(value === 'none' ? '' : value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择预设提示词（可选）" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">不使用预设</SelectItem>
+                    {prompts.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
                 <Textarea
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
                   placeholder="描述你想要的世界观,例如: 创建一个赛博朋克风格的未来都市..."
                   rows={3}
+                  className="w-full"
                 />
-                <Button onClick={handleGenerate} disabled={isGenerating}>
-                  <SparklesIcon className="h-4 w-4 mr-2" />
-                  {isGenerating ? '生成中...' : '生成'}
-                </Button>
+
+                <div className="flex justify-end">
+                  <Button onClick={handleGenerate} disabled={isGenerating}>
+                    <SparklesIcon className="h-4 w-4 mr-2" />
+                    {isGenerating ? '生成中...' : '生成'}
+                  </Button>
+                </div>
               </div>
             </div>
 
@@ -137,14 +254,19 @@ export function WorldEditor({ projectId, initialWorld }: WorldEditorProps) {
         <Card className="p-4">
           <div className="space-y-2">
             <label className="text-sm font-medium">世界观内容</label>
-            <Textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder="世界观内容将在这里显示..."
-              rows={20}
-              className="font-mono"
-            />
-            <Button onClick={handleSave} variant="outline">
+            {isStreaming ? (
+              <div className="border rounded-md p-4 min-h-[500px] bg-background">
+                <Typewriter text={streamingContent} typeSpeed={20} />
+              </div>
+            ) : (
+              <MarkdownEditor
+                value={content}
+                onChange={setContent}
+                placeholder="世界观内容将在这里显示..."
+                rows={20}
+              />
+            )}
+            <Button onClick={handleSave} variant="outline" disabled={isStreaming}>
               保存
             </Button>
           </div>
