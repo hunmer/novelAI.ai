@@ -8,10 +8,11 @@ interface Prompt {
   id: string;
   name: string;
   content: string;
-  type: 'world' | 'character';
+  type: 'world' | 'character' | 'scene' | 'dialog';
   projectId: string;
   createdAt: string;
   updatedAt: string;
+  isDefault?: boolean;
 }
 
 async function getPrompts(): Promise<Prompt[]> {

@@ -5,6 +5,7 @@ import { SceneEditor } from '@/components/editors/scene-editor';
 import { ProjectHeaderWrapper } from '@/components/project/project-header-wrapper';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { KnowledgeBaseTab } from '@/components/project/knowledge-base-tab';
+import { CharacterChatTab } from '@/components/project/character-chat-tab';
 
 export default async function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -22,6 +23,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           <TabsList className="mb-6">
             <TabsTrigger value="world">世界观</TabsTrigger>
             <TabsTrigger value="characters">角色</TabsTrigger>
+            <TabsTrigger value="chat">角色对话</TabsTrigger>
             <TabsTrigger value="scenes">场景</TabsTrigger>
             <TabsTrigger value="knowledge">知识库</TabsTrigger>
           </TabsList>
@@ -30,6 +32,9 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           </TabsContent>
           <TabsContent value="characters">
             <CharacterEditor projectId={project.id} worldContext={project.world || ''} />
+          </TabsContent>
+          <TabsContent value="chat">
+            <CharacterChatTab projectId={project.id} />
           </TabsContent>
           <TabsContent value="scenes">
             <SceneEditor projectId={project.id} worldContext={project.world || ''} />

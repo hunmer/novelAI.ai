@@ -12,22 +12,24 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { Plus, Trash2, Pencil, Sparkles } from 'lucide-react';
+import { Plus, Trash2, Pencil, Sparkles, RotateCcw } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { PROMPT_TEMPLATES } from '@/lib/ai/prompts';
 
 interface Prompt {
   id: string;
   name: string;
   content: string;
-  type: 'world' | 'character';
+  type: 'world' | 'character' | 'scene' | 'dialog';
   projectId: string;
   createdAt: string;
   updatedAt: string;
+  isDefault?: boolean; // 标记为默认提示词（不可删除）
 }
 
 interface PromptListProps {
   projectId: string;
-  type: 'world' | 'character';
+  type: 'world' | 'character' | 'scene' | 'dialog';
 }
 
 export function PromptList({ projectId, type }: PromptListProps) {
@@ -56,6 +58,49 @@ export function PromptList({ projectId, type }: PromptListProps) {
       console.error('获取提示词失败:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const restoreDefaultPrompts = async () => {
+    try {
+      // 根据类型选择对应的默认提示词
+      let defaultPrompts: { name: string; template: keyof typeof PROMPT_TEMPLATES }[] = [];
+
+      if (type === 'world') {
+        defaultPrompts = [{ name: '世界观生成（默认）', template: 'worldGen' }];
+      } else if (type === 'character') {
+        defaultPrompts = [{ name: '角色生成（默认）', template: 'characterGen' }];
+      } else if (type === 'scene') {
+        defaultPrompts = [{ name: '场景生成（默认）', template: 'sceneGen' }];
+      } else if (type === 'dialog') {
+        defaultPrompts = [{ name: '对话生成（默认）', template: 'dialogGen' }];
+      }
+
+      // 检查每个默认提示词是否存在，不存在则创建
+      for (const prompt of defaultPrompts) {
+        const exists = prompts.some(p => p.name === prompt.name && p.isDefault);
+
+        if (!exists) {
+          await fetch('/api/prompts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: prompt.name,
+              content: PROMPT_TEMPLATES[prompt.template].user,
+              type,
+              projectId,
+              isDefault: true, // 标记为默认提示词
+            }),
+          });
+        }
+      }
+
+      // 重新获取提示词列表
+      fetchPrompts();
+      alert('默认提示词已恢复');
+    } catch (error) {
+      console.error('恢复默认提示词失败:', error);
+      alert('恢复失败，请稍后重试');
     }
   };
 
@@ -163,15 +208,20 @@ export function PromptList({ projectId, type }: PromptListProps) {
     <div className="space-y-4">
       <div className="flex justify-between items-center">
         <h3 className="text-lg font-semibold">
-          {type === 'world' ? '世界观提示词列表' : '角色提示词列表'}
+          {type === 'world' ? '世界观提示词列表' : type === 'character' ? '角色提示词列表' : type === 'scene' ? '场景提示词列表' : '对话提示词列表'}
         </h3>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <Button onClick={resetForm}>
-              <Plus className="w-4 h-4 mr-2" />
-              添加提示词
-            </Button>
-          </DialogTrigger>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={restoreDefaultPrompts}>
+            <RotateCcw className="w-4 h-4 mr-2" />
+            恢复默认提示词
+          </Button>
+          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+            <DialogTrigger asChild>
+              <Button onClick={resetForm}>
+                <Plus className="w-4 h-4 mr-2" />
+                添加提示词
+              </Button>
+            </DialogTrigger>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
               <DialogTitle>
@@ -229,7 +279,8 @@ export function PromptList({ projectId, type }: PromptListProps) {
               </div>
             </form>
           </DialogContent>
-        </Dialog>
+          </Dialog>
+        </div>
       </div>
 
       <div className="space-y-3">
@@ -242,7 +293,7 @@ export function PromptList({ projectId, type }: PromptListProps) {
               <div className="flex items-center gap-2">
                 <h4 className="font-medium">{prompt.name}</h4>
                 <Badge variant="outline">
-                  {type === 'world' ? '世界观' : '角色'}
+                  {type === 'world' ? '世界观' : type === 'character' ? '角色' : type === 'scene' ? '场景' : '对话'}
                 </Badge>
               </div>
               <div className="flex gap-2">
@@ -257,6 +308,7 @@ export function PromptList({ projectId, type }: PromptListProps) {
                   size="sm"
                   variant="ghost"
                   onClick={() => handleDelete(prompt.id)}
+                  title="删除"
                 >
                   <Trash2 className="w-4 h-4" />
                 </Button>

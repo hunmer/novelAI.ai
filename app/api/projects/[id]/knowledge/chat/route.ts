@@ -119,7 +119,7 @@ export async function POST(
       });
     }
 
-    const result = await streamText({
+    const result = streamText({
       model: textModelInfo.model,
       messages: [{ role: 'system', content: systemPrompt }, ...normalizedMessages],
     });
@@ -132,7 +132,7 @@ export async function POST(
       await logger.endSnippet(snippetId);
     }
 
-    return result.toAIStreamResponse();
+    return result.toTextStreamResponse();
   } catch (error) {
     const message =
       error instanceof Error ? error.message : '知识库对话失败';

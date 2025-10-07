@@ -9,10 +9,11 @@ interface Prompt {
   id: string;
   name: string;
   content: string;
-  type: 'world' | 'character';
+  type: 'world' | 'character' | 'scene' | 'dialog';
   projectId: string;
   createdAt: string;
   updatedAt: string;
+  isDefault?: boolean;
 }
 
 async function ensureDataDir() {
@@ -43,7 +44,7 @@ export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const projectId = searchParams.get('projectId');
-    const type = searchParams.get('type') as 'world' | 'character' | null;
+    const type = searchParams.get('type') as 'world' | 'character' | 'scene' | 'dialog' | null;
 
     let prompts = await getPrompts();
 
@@ -65,7 +66,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, content, type, projectId } = body;
+    const { name, content, type, projectId, isDefault } = body;
 
     if (!name || !content || !type || !projectId) {
       return NextResponse.json({ error: '缺少必要字段' }, { status: 400 });
@@ -80,6 +81,7 @@ export async function POST(request: NextRequest) {
       projectId,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      isDefault: isDefault || false,
     };
 
     prompts.push(newPrompt);

@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { ModelProviderSettings } from '@/components/settings/model-provider-settings';
+import { PromptManagement } from '@/components/prompts/prompt-management';
 
 interface ProjectHeaderProps {
   projectId: string;
@@ -30,6 +31,7 @@ interface ProjectHeaderProps {
 export function ProjectHeader({ projectId, projectName, onlineUsers, isConnected }: ProjectHeaderProps) {
   const router = useRouter();
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
+  const [promptDialogOpen, setPromptDialogOpen] = useState(false);
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -61,7 +63,7 @@ export function ProjectHeader({ projectId, projectName, onlineUsers, isConnected
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => router.push(`/project/${projectId}/prompts`)}
+            onClick={() => setPromptDialogOpen(true)}
             className="gap-2"
           >
             <MessageSquare className="h-4 w-4" />
@@ -104,6 +106,15 @@ export function ProjectHeader({ projectId, projectName, onlineUsers, isConnected
             <DialogTitle>模型管理</DialogTitle>
           </DialogHeader>
           <ModelProviderSettings />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen}>
+        <DialogContent className="max-w-5xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>提示词管理</DialogTitle>
+          </DialogHeader>
+          <PromptManagement projectId={projectId} />
         </DialogContent>
       </Dialog>
     </header>
