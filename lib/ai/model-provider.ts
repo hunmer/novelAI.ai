@@ -81,6 +81,11 @@ export class ModelProviderService {
       });
     }
 
+    const metadataPayload = {
+      ...(config.metadata || {}),
+      ...(config.capability ? { capability: config.capability } : {}),
+    };
+
     const provider = await prisma.modelProvider.create({
       data: {
         name: config.name,
@@ -90,10 +95,11 @@ export class ModelProviderService {
         models: JSON.stringify(config.models),
         isDefault: config.isDefault || false,
         isActive: config.isActive !== false,
-        metadata: JSON.stringify(config.metadata || {}),
+        metadata: JSON.stringify(metadataPayload),
       },
     });
 
+    const metadata = JSON.parse(provider.metadata);
     return {
       id: provider.id,
       name: provider.name,
@@ -103,7 +109,8 @@ export class ModelProviderService {
       models: JSON.parse(provider.models),
       isDefault: provider.isDefault,
       isActive: provider.isActive,
-      metadata: JSON.parse(provider.metadata),
+      capability: metadata.capability as ModelCapability | undefined,
+      metadata,
     };
   }
 
@@ -114,6 +121,19 @@ export class ModelProviderService {
     id: string,
     config: Partial<ModelProviderConfig>
   ): Promise<ModelProviderConfig> {
+    const existing = await prisma.modelProvider.findUnique({ where: { id } });
+
+    if (!existing) {
+      throw new Error('模型提供商不存在');
+    }
+
+    const existingMetadata = JSON.parse(existing.metadata);
+    const metadataPayload = {
+      ...existingMetadata,
+      ...(config.metadata || {}),
+      ...(config.capability ? { capability: config.capability } : {}),
+    };
+
     // 如果设置为默认，取消其他默认设置
     if (config.isDefault) {
       await prisma.modelProvider.updateMany({
@@ -132,10 +152,11 @@ export class ModelProviderService {
         ...(config.models && { models: JSON.stringify(config.models) }),
         ...(config.isDefault !== undefined && { isDefault: config.isDefault }),
         ...(config.isActive !== undefined && { isActive: config.isActive }),
-        ...(config.metadata && { metadata: JSON.stringify(config.metadata) }),
+        metadata: JSON.stringify(metadataPayload),
       },
     });
 
+    const metadata = JSON.parse(provider.metadata);
     return {
       id: provider.id,
       name: provider.name,
@@ -145,7 +166,8 @@ export class ModelProviderService {
       models: JSON.parse(provider.models),
       isDefault: provider.isDefault,
       isActive: provider.isActive,
-      metadata: JSON.parse(provider.metadata),
+      capability: metadata.capability as ModelCapability | undefined,
+      metadata,
     };
   }
 

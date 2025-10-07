@@ -14,7 +14,9 @@
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.23",
     "@ai-sdk/openai": "^2.0.42",
-    "@hookform/resolvers": "^5.2.2",
+    "@autoform/react": "^4.0.0",
+    "@autoform/zod": "^5.0.0",
+    "@hookform/resolvers": "^3.9.1",
     "@logsop/client": "file:../../logsOP/packages/client",
     "@prisma/client": "^6.16.3",
     "@radix-ui/react-dialog": "^1.1.15",

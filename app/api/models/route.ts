@@ -35,7 +35,16 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
-    const { name, type, apiKey, baseUrl, models, isDefault, metadata } = body;
+    const {
+      name,
+      type,
+      apiKey,
+      baseUrl,
+      models,
+      isDefault,
+      capability,
+      metadata,
+    } = body;
 
     if (!name || !type || !apiKey || !models || !Array.isArray(models)) {
       return NextResponse.json(
@@ -51,6 +60,7 @@ export async function POST(request: NextRequest) {
       baseUrl,
       models,
       isDefault: isDefault || false,
+      capability,
       metadata: metadata || {},
     });
 
