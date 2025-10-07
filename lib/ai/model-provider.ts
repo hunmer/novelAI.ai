@@ -2,6 +2,8 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
+export type ModelCapability = 'text' | 'image' | 'vision';
+
 export interface ModelProviderConfig {
   id?: string;
   name: string;
@@ -11,6 +13,7 @@ export interface ModelProviderConfig {
   models: string[];
   isDefault?: boolean;
   isActive?: boolean;
+  capability?: ModelCapability; // 模型能力：文本生成、图片生成、视觉理解
   metadata?: Record<string, any>;
 }
 
@@ -24,17 +27,21 @@ export class ModelProviderService {
       orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
     });
 
-    return providers.map((p) => ({
-      id: p.id,
-      name: p.name,
-      type: p.type as 'openai' | 'anthropic' | 'custom',
-      apiKey: p.apiKey,
-      baseUrl: p.baseUrl || undefined,
-      models: JSON.parse(p.models),
-      isDefault: p.isDefault,
-      isActive: p.isActive,
-      metadata: JSON.parse(p.metadata),
-    }));
+    return providers.map((p) => {
+      const metadata = JSON.parse(p.metadata);
+      return {
+        id: p.id,
+        name: p.name,
+        type: p.type as 'openai' | 'anthropic' | 'custom',
+        apiKey: p.apiKey,
+        baseUrl: p.baseUrl || undefined,
+        models: JSON.parse(p.models),
+        isDefault: p.isDefault,
+        isActive: p.isActive,
+        capability: metadata.capability as ModelCapability | undefined,
+        metadata,
+      };
+    });
   }
 
   /**
@@ -47,6 +54,7 @@ export class ModelProviderService {
 
     if (!provider) return null;
 
+    const metadata = JSON.parse(provider.metadata);
     return {
       id: provider.id,
       name: provider.name,
@@ -56,7 +64,8 @@ export class ModelProviderService {
       models: JSON.parse(provider.models),
       isDefault: provider.isDefault,
       isActive: provider.isActive,
-      metadata: JSON.parse(provider.metadata),
+      capability: metadata.capability as ModelCapability | undefined,
+      metadata,
     };
   }
 
@@ -155,16 +164,28 @@ export class ModelProviderService {
       orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
     });
 
-    return providers.map((p) => ({
-      id: p.id,
-      name: p.name,
-      type: p.type as 'openai' | 'anthropic' | 'custom',
-      apiKey: p.apiKey,
-      baseUrl: p.baseUrl || undefined,
-      models: JSON.parse(p.models),
-      isDefault: p.isDefault,
-      isActive: p.isActive,
-      metadata: JSON.parse(p.metadata),
-    }));
+    return providers.map((p) => {
+      const metadata = JSON.parse(p.metadata);
+      return {
+        id: p.id,
+        name: p.name,
+        type: p.type as 'openai' | 'anthropic' | 'custom',
+        apiKey: p.apiKey,
+        baseUrl: p.baseUrl || undefined,
+        models: JSON.parse(p.models),
+        isDefault: p.isDefault,
+        isActive: p.isActive,
+        capability: metadata.capability as ModelCapability | undefined,
+        metadata,
+      };
+    });
+  }
+
+  /**
+   * 获取图片生成模型提供商
+   */
+  static async getImageProviders(): Promise<ModelProviderConfig[]> {
+    const providers = await this.getActiveProviders();
+    return providers.filter(p => p.capability === 'image');
   }
 }

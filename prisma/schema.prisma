@@ -38,15 +38,17 @@ model Character {
 }
 
 model Scene {
-  id          String   @id @default(cuid())
-  projectId   String
-  name        String
-  description String?
-  metadata    String   @default("{}")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id               String   @id @default(cuid())
+  projectId        String
+  name             String
+  description      String?  // Markdown格式的场景详细描述
+  paintingPrompt   String?  // 用于生成场景图片的绘画提示词
+  backgroundImage  String?  // 场景背景图URL
+  metadata         String   @default("{}")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  project     Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project          Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([projectId])
 }
@@ -119,4 +121,18 @@ model ModelProvider {
 
   @@index([isDefault])
   @@index([isActive])
+}
+
+model GeneratedImage {
+  id              String   @id @default(cuid())
+  projectId       String?  // 关联的项目ID（可选）
+  prompt          String   // 生成图片的提示词
+  modelProvider   String   // 使用的模型提供商
+  modelName       String   // 使用的具体模型
+  imageUrl        String   // 生成的图片URL
+  metadata        String   @default("{}")  // 额外信息（尺寸、风格等）
+  createdAt       DateTime @default(now())
+
+  @@index([projectId])
+  @@index([createdAt])
 }

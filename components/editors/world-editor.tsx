@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/card';
 import { updateWorld } from '@/lib/actions/world.actions';
 import { WorldVersionRollback } from '@/components/project/world-version-rollback';
 import { useSocket } from '@/lib/socket/client';
-import { SparklesIcon, RefreshCw } from 'lucide-react';
+import { SparklesIcon, RefreshCw, UsersIcon } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -17,6 +17,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Typewriter } from '@/components/ui/typewriter';
+import { GenerateCharactersDialog } from '@/components/dialogs/generate-characters-dialog';
+import { logger } from '@/lib/logger/client';
 
 interface Prompt {
   id: string;
@@ -40,6 +42,7 @@ export function WorldEditor({ projectId, initialWorld }: WorldEditorProps) {
   const [isStreaming, setIsStreaming] = useState(false);
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [selectedPromptId, setSelectedPromptId] = useState<string>('');
+  const [showCharacterDialog, setShowCharacterDialog] = useState(false);
 
   // 生成稳定的用户ID（仅在组件挂载时生成一次）
   const userId = useMemo(
@@ -192,6 +195,76 @@ export function WorldEditor({ projectId, initialWorld }: WorldEditorProps) {
     });
   };
 
+  const handleCharactersGenerated = async (charactersJson: string) => {
+    const snippetId = logger.startSnippet({
+      snippet_id: `add-characters-${Date.now()}`,
+      name: '添加生成的角色',
+    });
+
+    try {
+      if (snippetId) {
+        await logger.logSnippet('开始解析并添加角色', snippetId, 'character-add');
+      }
+
+      // 清理和提取JSON内容
+      let jsonContent = charactersJson.trim();
+
+      // 尝试提取JSON对象（处理可能的Markdown代码块或其他包装）
+      const jsonMatch = jsonContent.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        jsonContent = jsonMatch[0];
+      }
+
+      // 解析JSON格式的角色数据
+      const data = JSON.parse(jsonContent);
+      const characters = data.characters || [];
+
+      for (const char of characters) {
+        // 将角色数据转换为JSON字符串存储
+        const attributes = JSON.stringify({
+          age: char.age,
+          gender: char.gender,
+          personality: char.personality,
+          background: char.background,
+          skills: char.skills,
+          relationships: char.relationships,
+          role: char.role,
+        });
+
+        // 创建角色
+        await fetch(`/api/characters`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId,
+            name: char.name,
+            attributes,
+          }),
+        });
+      }
+
+      if (snippetId) {
+        await logger.logSnippet(`成功添加${characters.length}个角色`, snippetId, 'character-add');
+        await logger.endSnippet(snippetId);
+      }
+    } catch (error) {
+      if (snippetId) {
+        await logger.logSnippet(
+          `添加角色失败: ${error instanceof Error ? error.message : '未知错误'}`,
+          snippetId,
+          'character-add',
+          { level: 'error' }
+        );
+        await logger.endSnippet(snippetId);
+      }
+
+      await logger.error(
+        `添加角色失败: ${error instanceof Error ? error.message : '未知错误'}`,
+        'character-add'
+      );
+    }
+  };
+
   return (
     <div className="grid grid-cols-4 gap-4">
       <div className="col-span-3 space-y-4">
@@ -222,7 +295,15 @@ export function WorldEditor({ projectId, initialWorld }: WorldEditorProps) {
                   className="w-full"
                 />
 
-                <div className="flex justify-end">
+                <div className="flex justify-end gap-2">
+                  <Button
+                    onClick={() => setShowCharacterDialog(true)}
+                    disabled={!content}
+                    variant="outline"
+                  >
+                    <UsersIcon className="h-4 w-4 mr-2" />
+                    从世界观生成角色
+                  </Button>
                   <Button onClick={handleGenerate} disabled={isGenerating}>
                     <SparklesIcon className="h-4 w-4 mr-2" />
                     {isGenerating ? '生成中...' : '生成'}
@@ -280,6 +361,14 @@ export function WorldEditor({ projectId, initialWorld }: WorldEditorProps) {
           onRestore={() => window.location.reload()}
         />
       </div>
+
+      <GenerateCharactersDialog
+        open={showCharacterDialog}
+        onOpenChange={setShowCharacterDialog}
+        worldContext={content}
+        projectId={projectId}
+        onConfirm={handleCharactersGenerated}
+      />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { cn } from '@/lib/utils';
 
 interface TypewriterProps {
@@ -19,21 +19,32 @@ export function Typewriter({
   cursor = true,
 }: TypewriterProps) {
   const [displayedText, setDisplayedText] = useState('');
-  const [currentIndex, setCurrentIndex] = useState(0);
   const [showCursor, setShowCursor] = useState(true);
+  const currentIndexRef = useRef(0);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    if (currentIndex < text.length) {
-      const timeout = setTimeout(() => {
-        setDisplayedText((prev) => prev + text[currentIndex]);
-        setCurrentIndex((prev) => prev + 1);
-      }, typeSpeed);
+    // 如果新文本比当前显示的文本长,继续打字
+    if (currentIndexRef.current < text.length) {
+      // 清除之前的 timeout
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
 
-      return () => clearTimeout(timeout);
-    } else if (currentIndex === text.length && onComplete) {
+      timeoutRef.current = setTimeout(() => {
+        setDisplayedText(text.substring(0, currentIndexRef.current + 1));
+        currentIndexRef.current += 1;
+      }, typeSpeed);
+    } else if (currentIndexRef.current === text.length && currentIndexRef.current > 0 && onComplete) {
       onComplete();
     }
-  }, [currentIndex, text, typeSpeed, onComplete]);
+
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, [text, typeSpeed, onComplete]);
 
   useEffect(() => {
     if (cursor) {
@@ -45,16 +56,10 @@ export function Typewriter({
     }
   }, [cursor]);
 
-  // 重置当文本改变时
-  useEffect(() => {
-    setDisplayedText('');
-    setCurrentIndex(0);
-  }, [text]);
-
   return (
     <span className={cn('whitespace-pre-wrap', className)}>
       {displayedText}
-      {cursor && currentIndex < text.length && (
+      {cursor && currentIndexRef.current < text.length && (
         <span className={cn('inline-block w-0.5 h-5 bg-current ml-0.5', showCursor ? 'opacity-100' : 'opacity-0')}>
           |
         </span>

@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import { LoggerWidget } from '@/components/logger/logger-widget';
 
 export const metadata: Metadata = {
   title: 'Novel.AI - AI辅助小说创作平台',
@@ -13,7 +14,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body>
+        {children}
+        <LoggerWidget />
+      </body>
     </html>
   );
 }

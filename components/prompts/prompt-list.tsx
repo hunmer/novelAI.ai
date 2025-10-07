@@ -12,7 +12,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { Plus, Trash2, Pencil } from 'lucide-react';
+import { Plus, Trash2, Pencil, Sparkles } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 
 interface Prompt {
@@ -40,6 +40,8 @@ export function PromptList({ projectId, type }: PromptListProps) {
     name: '',
     content: '',
   });
+
+  const [optimizing, setOptimizing] = useState(false);
 
   useEffect(() => {
     fetchPrompts();
@@ -117,6 +119,42 @@ export function PromptList({ projectId, type }: PromptListProps) {
     setDialogOpen(true);
   };
 
+  const handleOptimize = async () => {
+    if (!formData.content.trim()) {
+      alert('请先输入提示词内容');
+      return;
+    }
+
+    setOptimizing(true);
+    try {
+      const res = await fetch('/api/ai/optimize-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: formData.content,
+          type,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (res.ok && data.optimizedPrompt) {
+        // 直接替换输入框内容
+        setFormData({
+          ...formData,
+          content: data.optimizedPrompt,
+        });
+      } else {
+        alert(data.error || '优化失败，请稍后重试');
+      }
+    } catch (error) {
+      console.error('优化提示词失败:', error);
+      alert('优化失败，请检查网络连接');
+    } finally {
+      setOptimizing(false);
+    }
+  };
+
   if (loading) {
     return <div className="p-4">加载中...</div>;
   }
@@ -164,18 +202,30 @@ export function PromptList({ projectId, type }: PromptListProps) {
                 />
               </div>
 
-              <div className="flex gap-2 justify-end">
+              <div className="flex gap-2 justify-between">
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => {
-                    resetForm();
-                    setDialogOpen(false);
-                  }}
+                  onClick={handleOptimize}
+                  disabled={optimizing || !formData.content.trim()}
+                  className="gap-2"
                 >
-                  取消
+                  <Sparkles className="w-4 h-4" />
+                  {optimizing ? '优化中...' : 'AI 优化'}
                 </Button>
-                <Button type="submit">保存</Button>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      resetForm();
+                      setDialogOpen(false);
+                    }}
+                  >
+                    取消
+                  </Button>
+                  <Button type="submit">保存</Button>
+                </div>
               </div>
             </form>
           </DialogContent>

@@ -1,6 +1,7 @@
 import { getProjectById } from '@/lib/actions/project.actions';
 import { WorldEditor } from '@/components/editors/world-editor';
 import { CharacterEditor } from '@/components/editors/character-editor';
+import { SceneEditor } from '@/components/editors/scene-editor';
 import { ProjectHeaderWrapper } from '@/components/project/project-header-wrapper';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
@@ -20,12 +21,16 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           <TabsList className="mb-6">
             <TabsTrigger value="world">世界观</TabsTrigger>
             <TabsTrigger value="characters">角色</TabsTrigger>
+            <TabsTrigger value="scenes">场景</TabsTrigger>
           </TabsList>
           <TabsContent value="world">
             <WorldEditor projectId={project.id} initialWorld={project.world || ''} />
           </TabsContent>
           <TabsContent value="characters">
             <CharacterEditor projectId={project.id} worldContext={project.world || ''} />
+          </TabsContent>
+          <TabsContent value="scenes">
+            <SceneEditor projectId={project.id} worldContext={project.world || ''} />
           </TabsContent>
         </Tabs>
       </div>

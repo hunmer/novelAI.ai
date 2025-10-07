@@ -15,6 +15,8 @@ import {
 } from '@/components/ui/dialog';
 import { Plus, Trash2, Check, X, Settings } from 'lucide-react';
 
+type ModelCapability = 'text' | 'image' | 'vision';
+
 interface ModelProvider {
   id: string;
   name: string;
@@ -24,6 +26,7 @@ interface ModelProvider {
   models: string[];
   isDefault: boolean;
   isActive: boolean;
+  capability?: ModelCapability;
 }
 
 export function ModelProviderSettings() {
@@ -40,6 +43,7 @@ export function ModelProviderSettings() {
     baseUrl: '',
     models: '',
     isDefault: false,
+    capability: 'text' as ModelCapability,
   });
 
   useEffect(() => {
@@ -139,6 +143,7 @@ export function ModelProviderSettings() {
       baseUrl: '',
       models: '',
       isDefault: false,
+      capability: 'text',
     });
     setEditingProvider(null);
   };
@@ -152,6 +157,7 @@ export function ModelProviderSettings() {
       baseUrl: provider.baseUrl || '',
       models: provider.models.join(', '),
       isDefault: provider.isDefault,
+      capability: provider.capability || 'text',
     });
     setDialogOpen(true);
   };
@@ -242,6 +248,26 @@ export function ModelProviderSettings() {
                 />
               </div>
 
+              <div>
+                <Label htmlFor="capability">模型能力</Label>
+                <select
+                  id="capability"
+                  value={formData.capability}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      capability: e.target.value as ModelCapability,
+                    })
+                  }
+                  className="w-full p-2 border rounded"
+                  required
+                >
+                  <option value="text">文本生成</option>
+                  <option value="image">图片生成</option>
+                  <option value="vision">视觉理解</option>
+                </select>
+              </div>
+
               <div className="flex items-center gap-2">
                 <input
                   type="checkbox"
@@ -286,6 +312,13 @@ export function ModelProviderSettings() {
                     {provider.isActive ? '已启用' : '已禁用'}
                   </Badge>
                   <Badge variant="outline">{provider.type}</Badge>
+                  {provider.capability && (
+                    <Badge variant="secondary">
+                      {provider.capability === 'text' && '文本'}
+                      {provider.capability === 'image' && '图片'}
+                      {provider.capability === 'vision' && '视觉'}
+                    </Badge>
+                  )}
                 </div>
 
                 <div className="text-sm text-gray-600 mb-2">

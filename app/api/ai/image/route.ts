@@ -1,0 +1,128 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { ModelProviderService } from '@/lib/ai/model-provider';
+import { PrismaClient } from '@prisma/client';
+import { logger } from '@/lib/logger/client';
+import OpenAI from 'openai';
+
+const prisma = new PrismaClient();
+
+export async function POST(req: NextRequest) {
+  const snippetId = logger.startSnippet({
+    snippet_id: `image-gen-${Date.now()}`,
+    name: '图片生成',
+  });
+
+  try {
+    const { prompt, providerId, model, projectId } = await req.json();
+
+    if (snippetId) {
+      await logger.logSnippet(
+        `开始生成图片: ${prompt.substring(0, 50)}...`,
+        snippetId,
+        'ai-image'
+      );
+    }
+
+    // 获取指定的模型提供商，如果未指定则获取第一个图片生成模型
+    let provider;
+    if (providerId) {
+      const allProviders = await ModelProviderService.getAllProviders();
+      provider = allProviders.find(p => p.id === providerId);
+    } else {
+      const imageProviders = await ModelProviderService.getImageProviders();
+      provider = imageProviders[0];
+    }
+
+    if (!provider) {
+      throw new Error('未找到可用的图片生成模型提供商');
+    }
+
+    // 使用 OpenAI SDK 生成图片
+    const openai = new OpenAI({
+      apiKey: provider.apiKey,
+      baseURL: provider.baseUrl,
+    });
+
+    const response = await openai.images.generate({
+      model: model || provider.models[0],
+      prompt,
+      n: 1,
+      size: '1024x1024',
+    });
+
+    const imageUrl = response.data[0]?.url;
+    if (!imageUrl) {
+      throw new Error('图片生成失败：未返回图片URL');
+    }
+
+    // 保存生成记录到数据库
+    const generatedImage = await prisma.generatedImage.create({
+      data: {
+        projectId: projectId || null,
+        prompt,
+        modelProvider: provider.name,
+        modelName: model || provider.models[0],
+        imageUrl,
+        metadata: JSON.stringify({
+          size: '1024x1024',
+          providerId: provider.id,
+        }),
+      },
+    });
+
+    if (snippetId) {
+      await logger.logSnippet('图片生成完成', snippetId, 'ai-image');
+      await logger.endSnippet(snippetId);
+    }
+
+    return NextResponse.json({
+      success: true,
+      imageUrl,
+      id: generatedImage.id,
+    });
+  } catch (error) {
+    if (snippetId) {
+      await logger.logSnippet(
+        `图片生成失败: ${error instanceof Error ? error.message : '未知错误'}`,
+        snippetId,
+        'ai-image',
+        { level: 'error' }
+      );
+      await logger.endSnippet(snippetId);
+    }
+
+    await logger.error(
+      `图片生成失败: ${error instanceof Error ? error.message : '未知错误'}`,
+      'ai-image'
+    );
+
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Image generation failed' },
+      { status: 500 }
+    );
+  }
+}
+
+// 获取图片生成历史
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const projectId = searchParams.get('projectId');
+    const limit = parseInt(searchParams.get('limit') || '20');
+
+    const where = projectId ? { projectId } : {};
+
+    const images = await prisma.generatedImage.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+
+    return NextResponse.json({ images });
+  } catch (error) {
+    return NextResponse.json(
+      { error: 'Failed to fetch image history' },
+      { status: 500 }
+    );
+  }
+}

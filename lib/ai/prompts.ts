@@ -49,6 +49,30 @@ ${characters ? `角色信息:\n${characters}\n\n` : ''}
 请生成对话内容,确保符合角色性格。
     `,
   },
+  promptOptimize: {
+    system: '你是一位专业的提示词优化专家，擅长改进和优化各类AI提示词，使其更加清晰、具体、有效。',
+    user: (input: string, type?: string) => `
+请优化以下${type === 'world' ? '世界观' : type === 'character' ? '角色' : ''}提示词，使其更加详细、结构化和有效。
+
+原始提示词：
+${input}
+
+优化要求：
+1. 保持原始意图，但让描述更加具体和详细
+2. 添加必要的结构化元素
+3. 确保语言流畅、逻辑清晰
+4. 增强提示词的可操作性
+
+请以JSON格式输出优化结果：
+{
+  "optimizedPrompt": "优化后的提示词内容",
+  "improvements": ["改进点1", "改进点2", "改进点3"],
+  "suggestions": "进一步优化建议（可选）"
+}
+
+注意：必须严格返回有效的JSON格式，不要包含任何其他文本。
+    `,
+  },
 };
 
 export type PromptType = keyof typeof PROMPT_TEMPLATES;
