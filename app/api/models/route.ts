@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ModelProviderService } from '@/lib/ai/model-provider';
+import {
+  ModelProviderService,
+  type ProviderModelConfig,
+  type ModelCapability,
+  ALL_MODEL_CAPABILITIES,
+} from '@/lib/ai/model-provider';
 import { getAllAvailableModels } from '@/lib/ai/dynamic-config';
 
 /**
@@ -31,6 +36,13 @@ export async function GET(request: NextRequest) {
 /**
  * POST /api/models - 添加新的模型提供商
  */
+function normalizeCapabilities(input: unknown): ModelCapability[] {
+  if (!Array.isArray(input)) return [];
+  return input.filter((value): value is ModelCapability =>
+    typeof value === 'string' && ALL_MODEL_CAPABILITIES.includes(value as ModelCapability)
+  );
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -46,9 +58,44 @@ export async function POST(request: NextRequest) {
       metadata,
     } = body;
 
-    if (!name || !type || !apiKey || !models || !Array.isArray(models)) {
+    if (!name || !type || !apiKey) {
       return NextResponse.json(
-        { error: '缺少必需字段: name, type, apiKey, models' },
+        { error: '缺少必需字段: name, type, apiKey' },
+        { status: 400 }
+      );
+    }
+
+    const normalizedModels: ProviderModelConfig[] = Array.isArray(models)
+      ? models
+          .map((item: unknown) => {
+            if (typeof item === 'string') {
+              return { name: item, capabilities: ['text'] } satisfies ProviderModelConfig;
+            }
+            if (!item || typeof item !== 'object') {
+              return null;
+            }
+
+            const record = item as Record<string, unknown>;
+
+            return {
+              name: typeof record.name === 'string' ? record.name : '',
+              label: typeof record.label === 'string' ? record.label : undefined,
+              description:
+                typeof record.description === 'string' ? record.description : undefined,
+              capabilities: normalizeCapabilities(record.capabilities),
+              defaultFor: normalizeCapabilities(record.defaultFor),
+              metadata:
+                record.metadata && typeof record.metadata === 'object'
+                  ? (record.metadata as Record<string, unknown>)
+                  : undefined,
+            } satisfies ProviderModelConfig;
+          })
+          .filter((value): value is ProviderModelConfig => !!value && !!value.name)
+      : [];
+
+    if (!normalizedModels.length) {
+      return NextResponse.json(
+        { error: '至少需要配置一个模型' },
         { status: 400 }
       );
     }
@@ -58,7 +105,7 @@ export async function POST(request: NextRequest) {
       type,
       apiKey,
       baseUrl,
-      models,
+      models: normalizedModels,
       isDefault: isDefault || false,
       capability,
       metadata: metadata || {},

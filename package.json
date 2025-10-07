@@ -14,6 +14,7 @@
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.23",
     "@ai-sdk/openai": "^2.0.42",
+    "@ai-sdk/react": "^2.0.60",
     "@autoform/react": "^4.0.0",
     "@autoform/zod": "^5.0.0",
     "@hookform/resolvers": "^3.9.1",

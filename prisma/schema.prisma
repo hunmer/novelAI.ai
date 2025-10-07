@@ -98,6 +98,7 @@ model KnowledgeBase {
   id        String   @id @default(cuid())
   projectId String
   content   String
+  embedding String   @default("[]")
   metadata  String   @default("{}")
   createdAt DateTime @default(now())
 

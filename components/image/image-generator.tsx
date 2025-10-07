@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -15,11 +14,17 @@ import {
 } from '@/components/ui/select';
 import { ImageIcon, Loader2, Download } from 'lucide-react';
 
+interface ProviderModel {
+  name: string;
+  label?: string;
+  capabilities: string[];
+  defaultFor?: string[];
+}
+
 interface ModelProvider {
   id: string;
   name: string;
-  models: string[];
-  capability?: string;
+  models: ProviderModel[];
 }
 
 interface GeneratedImage {
@@ -57,15 +62,29 @@ export function ImageGenerator({
       try {
         const res = await fetch('/api/models');
         const data = await res.json();
-        // 过滤出图片生成模型
-        const imageProviders = (data.providers || []).filter(
-          (p: ModelProvider) => p.capability === 'image'
-        );
+        // 过滤出包含图片能力的模型
+        const imageProviders = (data.providers || [])
+          .map((provider: any) => {
+            const models: ProviderModel[] = Array.isArray(provider.models)
+              ? provider.models.filter((model: any) =>
+                  Array.isArray(model?.capabilities) &&
+                  model.capabilities.includes('image')
+                )
+              : [];
+
+            return {
+              id: provider.id,
+              name: provider.name,
+              models,
+            } as ModelProvider;
+          })
+          .filter((provider: ModelProvider) => provider.models.length > 0);
         setProviders(imageProviders);
 
         if (imageProviders.length > 0) {
-          setSelectedProviderId(imageProviders[0].id);
-          setSelectedModel(imageProviders[0].models[0]);
+          const initialProvider = imageProviders[0];
+          setSelectedProviderId(initialProvider.id);
+          setSelectedModel(initialProvider.models[0]?.name || '');
         }
       } catch (error) {
         console.error('获取模型提供商失败:', error);
@@ -132,6 +151,17 @@ export function ImageGenerator({
 
   const selectedProvider = providers.find((p) => p.id === selectedProviderId);
 
+  useEffect(() => {
+    if (!selectedProvider) return;
+    if (!selectedProvider.models.find((model) => model.name === selectedModel)) {
+      const fallback =
+        selectedProvider.models.find((model) =>
+          (model.defaultFor || []).includes('image')
+        ) || selectedProvider.models[0];
+      setSelectedModel(fallback ? fallback.name : '');
+    }
+  }, [selectedProviderId, selectedProvider, selectedModel]);
+
   return (
     <div className="space-y-4">
       <Card className="p-4">
@@ -161,8 +191,8 @@ export function ImageGenerator({
                 </SelectTrigger>
                 <SelectContent>
                   {selectedProvider.models.map((model) => (
-                    <SelectItem key={model} value={model}>
-                      {model}
+                    <SelectItem key={model.name} value={model.name}>
+                      {model.label || model.name}
                     </SelectItem>
                   ))}
                 </SelectContent>

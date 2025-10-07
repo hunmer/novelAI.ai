@@ -37,6 +37,26 @@ export async function POST(req: NextRequest) {
       throw new Error('未找到可用的图片生成模型提供商');
     }
 
+    const imageModels = provider.models.filter((item) =>
+      item.capabilities.includes('image')
+    );
+
+    if (!imageModels.length) {
+      throw new Error('所选提供商未配置图片生成模型');
+    }
+
+    let modelConfig = model
+      ? imageModels.find((item) => item.name === model)
+      : imageModels.find((item) => (item.defaultFor || []).includes('image'));
+
+    if (!modelConfig) {
+      modelConfig = imageModels[0];
+    }
+
+    if (!modelConfig) {
+      throw new Error('未找到可用的图片生成模型');
+    }
+
     // 使用 OpenAI SDK 生成图片
     const openai = new OpenAI({
       apiKey: provider.apiKey,
@@ -44,7 +64,7 @@ export async function POST(req: NextRequest) {
     });
 
     const response = await openai.images.generate({
-      model: model || provider.models[0],
+      model: modelConfig.name,
       prompt,
       n: 1,
       size: '1024x1024',
@@ -61,7 +81,7 @@ export async function POST(req: NextRequest) {
         projectId: projectId || null,
         prompt,
         modelProvider: provider.name,
-        modelName: model || provider.models[0],
+        modelName: modelConfig.name,
         imageUrl,
         metadata: JSON.stringify({
           size: '1024x1024',
