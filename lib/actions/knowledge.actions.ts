@@ -160,3 +160,194 @@ export async function searchKnowledgeEntries(
     .sort((a, b) => b.similarity - a.similarity)
     .slice(0, topK);
 }
+
+interface ImportOptions {
+  worldview: boolean;
+  characters: boolean;
+  scenes: boolean;
+}
+
+interface ImportResult {
+  success: boolean;
+  imported: {
+    worldview?: string;
+    characters?: number;
+    scenes?: number;
+  };
+  message: string;
+}
+
+export async function importProjectSettings(
+  projectId: string,
+  options: ImportOptions
+): Promise<ImportResult> {
+  const imported: ImportResult['imported'] = {};
+  let totalImported = 0;
+
+  try {
+    // 导入世界观设定
+    if (options.worldview) {
+      const project = await prisma.project.findUnique({
+        where: { id: projectId },
+        select: { world: true },
+      });
+
+      if (project?.world && project.world !== '{}' && project.world.trim()) {
+        // 使用固定ID来确保幂等性
+        const worldEntryId = `${projectId}-worldview`;
+
+        // 检查是否已存在
+        const existing = await prisma.knowledgeBase.findFirst({
+          where: {
+            projectId,
+            metadata: {
+              contains: `"settingId":"${worldEntryId}"`,
+            },
+          },
+        });
+
+        if (existing) {
+          // 更新现有条目
+          const vector = await generateEmbedding(project.world);
+          await prisma.knowledgeBase.update({
+            where: { id: existing.id },
+            data: {
+              content: project.world,
+              embedding: serializeEmbedding(vector),
+              metadata: serializeMetadata({
+                title: '世界观设定',
+                settingId: worldEntryId,
+                type: 'worldview',
+              }),
+            },
+          });
+        } else {
+          // 创建新条目
+          await createKnowledgeEntry(projectId, project.world, {
+            title: '世界观设定',
+            settingId: worldEntryId,
+            type: 'worldview',
+          });
+        }
+
+        imported.worldview = worldEntryId;
+        totalImported++;
+      }
+    }
+
+    // 导入角色列表
+    if (options.characters) {
+      const characters = await prisma.character.findMany({
+        where: { projectId },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      for (const character of characters) {
+        const characterEntryId = `${projectId}-character-${character.id}`;
+
+        const content = `# 角色：${character.name}\n\n${character.attributes}`;
+
+        // 检查是否已存在
+        const existing = await prisma.knowledgeBase.findFirst({
+          where: {
+            projectId,
+            metadata: {
+              contains: `"settingId":"${characterEntryId}"`,
+            },
+          },
+        });
+
+        if (existing) {
+          // 更新现有条目
+          const vector = await generateEmbedding(content);
+          await prisma.knowledgeBase.update({
+            where: { id: existing.id },
+            data: {
+              content,
+              embedding: serializeEmbedding(vector),
+              metadata: serializeMetadata({
+                title: `角色：${character.name}`,
+                settingId: characterEntryId,
+                type: 'character',
+                characterId: character.id,
+              }),
+            },
+          });
+        } else {
+          // 创建新条目
+          await createKnowledgeEntry(projectId, content, {
+            title: `角色：${character.name}`,
+            settingId: characterEntryId,
+            type: 'character',
+            characterId: character.id,
+          });
+        }
+      }
+
+      imported.characters = characters.length;
+      totalImported += characters.length;
+    }
+
+    // 导入场景列表
+    if (options.scenes) {
+      const scenes = await prisma.scene.findMany({
+        where: { projectId },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      for (const scene of scenes) {
+        const sceneEntryId = `${projectId}-scene-${scene.id}`;
+
+        const content = `# 场景：${scene.name}\n\n${scene.description || '无描述'}`;
+
+        // 检查是否已存在
+        const existing = await prisma.knowledgeBase.findFirst({
+          where: {
+            projectId,
+            metadata: {
+              contains: `"settingId":"${sceneEntryId}"`,
+            },
+          },
+        });
+
+        if (existing) {
+          // 更新现有条目
+          const vector = await generateEmbedding(content);
+          await prisma.knowledgeBase.update({
+            where: { id: existing.id },
+            data: {
+              content,
+              embedding: serializeEmbedding(vector),
+              metadata: serializeMetadata({
+                title: `场景：${scene.name}`,
+                settingId: sceneEntryId,
+                type: 'scene',
+                sceneId: scene.id,
+              }),
+            },
+          });
+        } else {
+          // 创建新条目
+          await createKnowledgeEntry(projectId, content, {
+            title: `场景：${scene.name}`,
+            settingId: sceneEntryId,
+            type: 'scene',
+            sceneId: scene.id,
+          });
+        }
+      }
+
+      imported.scenes = scenes.length;
+      totalImported += scenes.length;
+    }
+
+    return {
+      success: true,
+      imported,
+      message: `成功导入 ${totalImported} 项设定到知识库`,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '导入失败';
+    throw new Error(message);
+  }
+}

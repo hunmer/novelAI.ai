@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { MarkdownEditor } from '@/components/ui/markdown-editor';
 import { Card } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -15,8 +14,10 @@ import {
 } from '@/lib/actions/character.actions';
 import { SparklesIcon, PlusIcon, TrashIcon } from 'lucide-react';
 import type { Character } from '@prisma/client';
-import { Typewriter } from '@/components/ui/typewriter';
 import { ImageGenerator } from '@/components/image/image-generator';
+import dynamic from 'next/dynamic';
+
+const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
 
 interface CharacterEditorProps {
   projectId: string;
@@ -50,7 +51,11 @@ export function CharacterEditor({ projectId, worldContext }: CharacterEditorProp
       const response = await fetch('/api/ai/character', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, worldContext }),
+        body: JSON.stringify({
+          prompt,
+          worldContext,
+          outputFormat: 'json'
+        }),
       });
 
       if (!response.ok) throw new Error('Generation failed');
@@ -69,14 +74,30 @@ export function CharacterEditor({ projectId, worldContext }: CharacterEditorProp
           setStreamingContent(fullText);
         }
 
+        // 解析JSON并提取角色信息
+        let characterName = 'AI生成角色';
+        let paintingPrompt = '';
+
+        try {
+          const jsonMatch = fullText.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const characterData = JSON.parse(jsonMatch[0]);
+            characterName = characterData.name || characterName;
+            paintingPrompt = characterData.paintingPrompt || '';
+          }
+        } catch (e) {
+          console.warn('Failed to parse character JSON:', e);
+        }
+
         // 创建新角色
         const newChar = await fetch(`/api/characters`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             projectId,
-            name: 'AI生成角色',
+            name: characterName,
             attributes: fullText,
+            paintingPrompt,
           }),
         }).then(res => res.json());
 
@@ -127,7 +148,7 @@ export function CharacterEditor({ projectId, worldContext }: CharacterEditorProp
   const selected = characters.find((c) => c.id === selectedId);
 
   return (
-    <div className="grid grid-cols-[300px_1fr_400px] gap-4">
+    <div className="grid grid-cols-[300px_1fr] gap-4">
       <div className="space-y-4">
         <Card className="p-4">
           <div className="space-y-2">
@@ -176,43 +197,63 @@ export function CharacterEditor({ projectId, worldContext }: CharacterEditorProp
         {isStreaming ? (
           <Card className="p-4 space-y-4">
             <div className="text-sm font-medium">正在生成角色...</div>
-            <div className="border rounded-md p-4 min-h-[500px] bg-background">
-              <Typewriter text={streamingContent} typeSpeed={20} />
+            <div className="border rounded-md overflow-hidden">
+              <Editor
+                height="500px"
+                defaultLanguage="plaintext"
+                theme="vs-dark"
+                value={streamingContent}
+                options={{
+                  readOnly: true,
+                  minimap: { enabled: false },
+                  fontSize: 14,
+                  lineNumbers: 'on',
+                  scrollBeyondLastLine: false,
+                  wordWrap: 'on',
+                  automaticLayout: true,
+                }}
+              />
             </div>
           </Card>
         ) : selected ? (
-          <Card className="p-4 space-y-4">
-            <div>
-              <Label htmlFor="character-name">角色名称</Label>
-              <Input
-                id="character-name"
-                value={selected.name}
-                onChange={(e) => handleUpdate(selected.id, { name: e.target.value })}
-              />
-            </div>
-            <div>
-              <Label htmlFor="character-attrs">角色属性（Markdown）</Label>
-              <MarkdownEditor
-                id="character-attrs"
-                value={selected.attributes}
-                onChange={(value) => handleUpdate(selected.id, { attributes: value })}
-                rows={20}
-              />
-            </div>
-          </Card>
-        ) : (
-          <Card className="p-12 text-center text-muted-foreground">
-            选择或生成一个角色
-          </Card>
-        )}
-      </div>
-
-      <div>
-        {selected && !isStreaming ? (
-          <Tabs defaultValue="portrait">
-            <TabsList className="mb-4 w-full">
-              <TabsTrigger value="portrait" className="flex-1">角色插画</TabsTrigger>
+          <Tabs defaultValue="description">
+            <TabsList className="mb-4">
+              <TabsTrigger value="description">角色描述</TabsTrigger>
+              <TabsTrigger value="portrait">角色插画</TabsTrigger>
             </TabsList>
+
+            <TabsContent value="description">
+              <Card className="p-4 space-y-4">
+                <div>
+                  <Label htmlFor="character-name">角色名称</Label>
+                  <Input
+                    id="character-name"
+                    value={selected.name}
+                    onChange={(e) => handleUpdate(selected.id, { name: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="character-attrs">角色属性</Label>
+                  <div className="border rounded-md overflow-hidden">
+                    <Editor
+                      height="500px"
+                      defaultLanguage="json"
+                      theme="vs-dark"
+                      value={selected.attributes}
+                      onChange={(value) => handleUpdate(selected.id, { attributes: value || '' })}
+                      options={{
+                        minimap: { enabled: false },
+                        fontSize: 14,
+                        lineNumbers: 'on',
+                        scrollBeyondLastLine: false,
+                        wordWrap: 'on',
+                        automaticLayout: true,
+                      }}
+                    />
+                  </div>
+                </div>
+              </Card>
+            </TabsContent>
 
             <TabsContent value="portrait">
               <div className="space-y-4">
@@ -245,7 +286,7 @@ export function CharacterEditor({ projectId, worldContext }: CharacterEditorProp
           </Tabs>
         ) : (
           <Card className="p-12 text-center text-muted-foreground">
-            {isStreaming ? '生成中...' : '选择一个角色查看详情'}
+            选择或生成一个角色
           </Card>
         )}
       </div>

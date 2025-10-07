@@ -9,7 +9,7 @@ export async function POST(req: NextRequest) {
   });
 
   try {
-    const { prompt, worldContext } = await req.json();
+    const { prompt, worldContext, outputFormat } = await req.json();
 
     if (snippetId) {
       await logger.logSnippet(
@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const result = await AIClient.generateStream('characterGen', prompt, worldContext);
+    const result = await AIClient.generateStream('characterGen', prompt, worldContext, { outputFormat });
 
     if (snippetId) {
       await logger.logSnippet('角色生成完成', snippetId, 'ai-character');

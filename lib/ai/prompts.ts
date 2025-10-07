@@ -1,7 +1,7 @@
 export const PROMPT_TEMPLATES = {
   worldGen: {
     system: '你是一位资深的小说世界观设计师,擅长创建丰富、连贯的虚构世界。',
-    user: (input: string, kb?: string) => `
+    user: (input: string, kb?: string, outputFormat: 'json' | 'markdown' = 'markdown') => `
 ${kb ? `参考知识库:\n${kb}\n\n` : ''}
 用户需求: ${input}
 
@@ -11,18 +11,19 @@ ${kb ? `参考知识库:\n${kb}\n\n` : ''}
 3. 势力与派系
 4. 核心规则与设定
 
-以JSON格式输出:
+${outputFormat === 'json' ? '请直接以JSON格式输出（不要使用markdown代码块包裹）:' : '以JSON格式输出:'}
 {
   "background": "...",
   "geography": "...",
   "factions": [...],
   "rules": [...]
 }
+${outputFormat === 'json' ? '\n注意：必须返回纯JSON格式，不要添加任何markdown语法（如```json），只返回JSON对象本身。' : ''}
     `,
   },
   characterGen: {
     system: '你是一位角色设计专家,擅长创建立体、有深度的小说角色。',
-    user: (input: string, worldContext?: string) => `
+    user: (input: string, worldContext?: string, outputFormat: 'json' | 'markdown' = 'markdown') => `
 ${worldContext ? `世界观背景:\n${worldContext}\n\n` : ''}
 用户需求: ${input}
 
@@ -32,8 +33,20 @@ ${worldContext ? `世界观背景:\n${worldContext}\n\n` : ''}
 3. 背景故事
 4. 能力与技能
 5. 人际关系
+6. 角色插画生成提示词(英文,用于生成PNG格式的角色插画)
 
-以JSON格式输出。
+${outputFormat === 'json' ? '请直接以JSON格式输出（不要使用markdown代码块包裹）:' : '以JSON格式输出:'}
+{
+  "name": "角色名称",
+  "age": "年龄",
+  "gender": "性别",
+  "personality": "性格特征",
+  "background": "背景故事",
+  "abilities": ["能力1", "能力2"],
+  "relationships": "人际关系",
+  "paintingPrompt": "详细的英文绘画提示词,用于生成PNG格式的角色插画,应包含角色外貌、服装、姿态、风格等细节"
+}
+${outputFormat === 'json' ? '\n注意：必须返回纯JSON格式，不要添加任何markdown语法（如```json），只返回JSON对象本身。' : ''}
     `,
   },
   sceneGen: {

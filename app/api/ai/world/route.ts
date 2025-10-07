@@ -9,7 +9,7 @@ export async function POST(req: NextRequest) {
   });
 
   try {
-    const { prompt, kbContext } = await req.json();
+    const { prompt, kbContext, outputFormat } = await req.json();
 
     if (snippetId) {
       await logger.logSnippet(
@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const result = await AIClient.generateStream('worldGen', prompt, kbContext);
+    const result = await AIClient.generateStream('worldGen', prompt, kbContext, { outputFormat });
 
     if (snippetId) {
       await logger.logSnippet('世界观生成完成', snippetId, 'ai-world');

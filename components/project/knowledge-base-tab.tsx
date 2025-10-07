@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Loader2, MessageCircle, Plus, Send, Trash2, Upload, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { ImportSettingsDialog } from '@/components/dialogs/import-settings-dialog';
 
 interface KnowledgeEntry {
   id: string;
@@ -213,10 +214,13 @@ export function KnowledgeBaseTab({ projectId }: KnowledgeBaseTabProps) {
               上传或编写内容后系统会自动生成向量索引
             </p>
           </div>
-          <Badge variant="outline" className="gap-1">
-            <Upload className="h-3.5 w-3.5" />
-            新增片段
-          </Badge>
+          <div className="flex items-center gap-2">
+            <ImportSettingsDialog projectId={projectId} onImportComplete={fetchEntries} />
+            <Badge variant="outline" className="gap-1">
+              <Upload className="h-3.5 w-3.5" />
+              新增片段
+            </Badge>
+          </div>
         </div>
 
         <div className="flex-1 space-y-3 overflow-y-auto px-5 py-4">

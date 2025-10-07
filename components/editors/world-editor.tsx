@@ -3,8 +3,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { MarkdownEditor } from '@/components/ui/markdown-editor';
 import { Card } from '@/components/ui/card';
+import { Label } from '@/components/ui/label';
 import { updateWorld } from '@/lib/actions/world.actions';
 import { WorldVersionRollback } from '@/components/project/world-version-rollback';
 import { useSocket } from '@/lib/socket/client';
@@ -16,9 +16,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Typewriter } from '@/components/ui/typewriter';
 import { GenerateCharactersDialog } from '@/components/dialogs/generate-characters-dialog';
 import { logger } from '@/lib/logger/client';
+import dynamic from 'next/dynamic';
+
+const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
 
 interface Prompt {
   id: string;
@@ -108,7 +110,10 @@ export function WorldEditor({ projectId, initialWorld }: WorldEditorProps) {
       const response = await fetch('/api/ai/world', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: finalPrompt }),
+        body: JSON.stringify({
+          prompt: finalPrompt,
+          outputFormat: 'json'
+        }),
       });
 
       if (!response.ok) throw new Error('Generation failed');
@@ -151,7 +156,10 @@ export function WorldEditor({ projectId, initialWorld }: WorldEditorProps) {
       const response = await fetch('/api/ai/world', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: combinedPrompt }),
+        body: JSON.stringify({
+          prompt: combinedPrompt,
+          outputFormat: 'json'
+        }),
       });
 
       if (!response.ok) throw new Error('Refinement failed');
@@ -335,18 +343,24 @@ export function WorldEditor({ projectId, initialWorld }: WorldEditorProps) {
         <Card className="p-4">
           <div className="space-y-2">
             <label className="text-sm font-medium">世界观内容</label>
-            {isStreaming ? (
-              <div className="border rounded-md p-4 min-h-[500px] bg-background">
-                <Typewriter text={streamingContent} typeSpeed={20} />
-              </div>
-            ) : (
-              <MarkdownEditor
-                value={content}
-                onChange={setContent}
-                placeholder="世界观内容将在这里显示..."
-                rows={20}
+            <div className="border rounded-md overflow-hidden">
+              <Editor
+                height="500px"
+                defaultLanguage={isStreaming ? "plaintext" : "json"}
+                theme="vs-dark"
+                value={isStreaming ? streamingContent : content}
+                onChange={(value) => !isStreaming && setContent(value || '')}
+                options={{
+                  readOnly: isStreaming,
+                  minimap: { enabled: false },
+                  fontSize: 14,
+                  lineNumbers: 'on',
+                  scrollBeyondLastLine: false,
+                  wordWrap: 'on',
+                  automaticLayout: true,
+                }}
               />
-            )}
+            </div>
             <Button onClick={handleSave} variant="outline" disabled={isStreaming}>
               保存
             </Button>

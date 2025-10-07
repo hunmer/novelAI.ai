@@ -46,6 +46,7 @@ export class AIClient {
     options?: {
       providerId?: string;
       modelName?: string;
+      outputFormat?: 'json' | 'markdown';
     }
   ): Promise<IAIResponse> {
     const snippetId = logger.startSnippet({
@@ -55,7 +56,7 @@ export class AIClient {
 
     try {
       const template = PROMPT_TEMPLATES[type];
-      const prompt = template.user(userInput, context);
+      const prompt = template.user(userInput, context, options?.outputFormat);
 
       // 获取模型
       let model: LanguageModel;
@@ -146,6 +147,7 @@ export class AIClient {
     options?: {
       providerId?: string;
       modelName?: string;
+      outputFormat?: 'json' | 'markdown';
     }
   ) {
     const snippetId = logger.startSnippet({
@@ -155,7 +157,7 @@ export class AIClient {
 
     try {
       const template = PROMPT_TEMPLATES[type];
-      const prompt = template.user(userInput, context);
+      const prompt = template.user(userInput, context, options?.outputFormat);
 
       // 获取模型
       let model: LanguageModel;
