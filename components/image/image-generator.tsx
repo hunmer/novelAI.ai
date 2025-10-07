@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card } from '@/components/ui/card';
@@ -12,7 +12,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { ImageIcon, Loader2, Download } from 'lucide-react';
+import {
+  ImageIcon,
+  Loader2,
+  Download,
+  CheckIcon,
+  Trash2,
+} from 'lucide-react';
+import Lightbox from 'yet-another-react-lightbox';
+import Captions from 'yet-another-react-lightbox/plugins/captions';
+import Zoom from 'yet-another-react-lightbox/plugins/zoom';
+import 'yet-another-react-lightbox/styles.css';
+import 'yet-another-react-lightbox/plugins/captions.css';
+import 'yet-another-react-lightbox/plugins/zoom.css';
 
 interface ProviderModel {
   name: string;
@@ -36,16 +48,25 @@ interface GeneratedImage {
   createdAt: string;
 }
 
+interface GalleryImage extends GeneratedImage {
+  isCurrentBackground?: boolean;
+  isSynthetic?: boolean;
+}
+
 interface ImageGeneratorProps {
   projectId?: string;
   initialPrompt?: string;
   onImageGenerated?: (imageUrl: string, imageId: string) => void;
+  highlightImageUrl?: string | null;
+  onSetBackground?: (imageUrl: string) => void;
 }
 
 export function ImageGenerator({
   projectId,
   initialPrompt = '',
   onImageGenerated,
+  highlightImageUrl,
+  onSetBackground,
 }: ImageGeneratorProps) {
   const [prompt, setPrompt] = useState(initialPrompt);
   const [providers, setProviders] = useState<ModelProvider[]>([]);
@@ -55,6 +76,12 @@ export function ImageGenerator({
   const [generatedImageUrl, setGeneratedImageUrl] = useState<string>('');
   const [imageHistory, setImageHistory] = useState<GeneratedImage[]>([]);
   const [showHistory, setShowHistory] = useState(true);
+  const [isLightboxOpen, setIsLightboxOpen] = useState(false);
+  const [activeSlide, setActiveSlide] = useState(0);
+
+  useEffect(() => {
+    setPrompt(initialPrompt);
+  }, [initialPrompt]);
 
   // 加载图片生成模型提供商
   useEffect(() => {
@@ -94,11 +121,7 @@ export function ImageGenerator({
   }, []);
 
   // 加载图片生成历史
-  useEffect(() => {
-    fetchImageHistory();
-  }, [projectId]);
-
-  const fetchImageHistory = async () => {
+  const fetchImageHistory = useCallback(async () => {
     try {
       const url = projectId
         ? `/api/ai/image?projectId=${projectId}&limit=10`
@@ -109,7 +132,91 @@ export function ImageGenerator({
     } catch (error) {
       console.error('获取图片历史失败:', error);
     }
-  };
+  }, [projectId]);
+
+  useEffect(() => {
+    fetchImageHistory();
+  }, [fetchImageHistory]);
+
+  const displayedImages = useMemo<GalleryImage[]>(() => {
+    if (!imageHistory.length && !highlightImageUrl) {
+      return [];
+    }
+
+    if (!highlightImageUrl) {
+      return imageHistory.map((img) => ({ ...img }));
+    }
+
+    const historyWithFlag = imageHistory.map<GalleryImage>((img) => ({
+      ...img,
+      isCurrentBackground: img.imageUrl === highlightImageUrl,
+    }));
+
+    const pinned = historyWithFlag.find((img) => img.isCurrentBackground);
+    const remainder = historyWithFlag.filter((img) => !img.isCurrentBackground);
+
+    if (pinned) {
+      return [pinned, ...remainder];
+    }
+
+    return [
+      {
+        id: 'current-background',
+        imageUrl: highlightImageUrl,
+        prompt: '当前背景图',
+        modelProvider: '',
+        modelName: '',
+        createdAt: '',
+        isCurrentBackground: true,
+        isSynthetic: true,
+      },
+      ...historyWithFlag,
+    ];
+  }, [imageHistory, highlightImageUrl]);
+
+  const slides = useMemo(
+    () =>
+      displayedImages.map((img) => ({
+        src: img.imageUrl,
+        description: img.prompt,
+        title: img.createdAt ? new Date(img.createdAt).toLocaleString() : '当前背景图',
+      })),
+    [displayedImages]
+  );
+
+  const handleOpenLightbox = useCallback((index: number) => {
+    setActiveSlide(index);
+    setIsLightboxOpen(true);
+  }, []);
+
+  const handleSetBackgroundFromSlide = useCallback(() => {
+    if (!onSetBackground) return;
+    const target = displayedImages[activeSlide];
+    if (!target || target.isCurrentBackground) return;
+    onSetBackground(target.imageUrl);
+    setGeneratedImageUrl(target.imageUrl);
+    setIsLightboxOpen(false);
+  }, [activeSlide, displayedImages, onSetBackground]);
+
+  const handleDeleteSlide = useCallback(async () => {
+    const target = displayedImages[activeSlide];
+    if (!target || target.isSynthetic) return;
+
+    try {
+      const res = await fetch(`/api/ai/image?id=${target.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        throw new Error('删除图片失败');
+      }
+      await fetchImageHistory();
+      setGeneratedImageUrl((current) =>
+        current === target.imageUrl ? '' : current
+      );
+      setIsLightboxOpen(false);
+    } catch (error) {
+      console.error('删除图片失败:', error);
+      alert('删除图片失败，请稍后再试');
+    }
+  }, [activeSlide, displayedImages, fetchImageHistory]);
 
   const handleGenerate = async () => {
     if (!prompt || !selectedProviderId) return;
@@ -267,13 +374,16 @@ export function ImageGenerator({
           </Button>
         </div>
 
-        {showHistory && (
+        {showHistory && displayedImages.length > 0 && (
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            {imageHistory.map((img) => (
+            {displayedImages.map((img, index) => (
               <div
-                key={img.id}
+                key={`${img.id}-${index}`}
                 className="relative group cursor-pointer"
-                onClick={() => setGeneratedImageUrl(img.imageUrl)}
+                onClick={() => {
+                  setGeneratedImageUrl(img.imageUrl);
+                  handleOpenLightbox(index);
+                }}
               >
                 <img
                   src={img.imageUrl}
@@ -281,21 +391,71 @@ export function ImageGenerator({
                   className="w-full aspect-square object-cover rounded-lg"
                 />
                 <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-all rounded-lg flex items-center justify-center">
-                  <div className="text-white text-xs p-2 opacity-0 group-hover:opacity-100 text-center">
-                    {img.prompt.substring(0, 50)}...
+                  <div className="text-white text-xs p-2 opacity-0 group-hover:opacity-100 text-center max-h-20 overflow-hidden text-ellipsis">
+                    {img.prompt || '暂无提示词'}
                   </div>
                 </div>
+                {img.isCurrentBackground && (
+                  <div className="absolute right-2 top-2 rounded-full bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground shadow">
+                    当前背景
+                  </div>
+                )}
               </div>
             ))}
           </div>
         )}
 
-        {showHistory && imageHistory.length === 0 && (
+        {showHistory && displayedImages.length === 0 && (
           <div className="text-center text-muted-foreground py-8">
             暂无生成历史
           </div>
         )}
       </Card>
+
+      {slides.length > 0 && (
+        <Lightbox
+          open={isLightboxOpen}
+          close={() => setIsLightboxOpen(false)}
+          index={activeSlide}
+          slides={slides}
+          plugins={[Captions, Zoom]}
+          on={{ view: ({ index }) => setActiveSlide(index ?? 0) }}
+          render={{
+            toolbar: ({ buttons, index }) => {
+              const target = displayedImages[index ?? activeSlide];
+              const disableSetBackground =
+                !onSetBackground || !target || target.isCurrentBackground;
+              const disableDelete = !target || target.isSynthetic;
+
+              return (
+                <div className="flex items-center gap-2">
+                  {buttons}
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="flex items-center gap-1"
+                    disabled={disableSetBackground}
+                    onClick={handleSetBackgroundFromSlide}
+                  >
+                    <CheckIcon className="h-4 w-4" />
+                    设置背景图
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    className="flex items-center gap-1"
+                    disabled={disableDelete}
+                    onClick={handleDeleteSlide}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    删除记录
+                  </Button>
+                </div>
+              );
+            },
+          }}
+        />
+      )}
     </div>
   );
 }

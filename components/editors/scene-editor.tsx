@@ -8,13 +8,7 @@ import { MarkdownEditor } from '@/components/ui/markdown-editor';
 import { Card } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-  SparklesIcon,
-  PlusIcon,
-  TrashIcon,
-  ImageIcon,
-  CheckIcon,
-} from 'lucide-react';
+import { SparklesIcon, TrashIcon } from 'lucide-react';
 import { Typewriter } from '@/components/ui/typewriter';
 import { ImageGenerator } from '@/components/image/image-generator';
 
@@ -153,6 +147,11 @@ export function SceneEditor({ projectId, worldContext }: SceneEditorProps) {
     }
   };
 
+  const handleSetBackground = (imageUrl: string | null) => {
+    if (!selectedId) return;
+    handleUpdate(selectedId, { backgroundImage: imageUrl });
+  };
+
   const selected = scenes.find((s) => s.id === selectedId);
 
   return (
@@ -185,15 +184,25 @@ export function SceneEditor({ projectId, worldContext }: SceneEditorProps) {
               }`}
               onClick={() => setSelectedId(scene.id)}
             >
-              <div className="flex items-center justify-between">
-                <div className="flex-1">
-                  <div className="font-medium">{scene.name}</div>
-                  {scene.backgroundImage && (
-                    <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-                      <ImageIcon className="h-3 w-3" />
-                      已设置背景图
+              <div className="flex items-center gap-3">
+                <div className="h-12 w-12 overflow-hidden rounded-md border bg-muted">
+                  {scene.backgroundImage ? (
+                    <img
+                      src={scene.backgroundImage}
+                      alt={`${scene.name} 缩略图`}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-[10px] text-muted-foreground">
+                      无封面
                     </div>
                   )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium truncate">{scene.name}</div>
+                  <div className="text-xs text-muted-foreground mt-1 truncate">
+                    {scene.description ? '已编写描述' : '暂无描述'}
+                  </div>
                 </div>
                 <Button
                   size="icon"
@@ -266,32 +275,25 @@ export function SceneEditor({ projectId, worldContext }: SceneEditorProps) {
 
             <TabsContent value="image">
               <div className="space-y-4">
-                {selected.backgroundImage && (
-                  <Card className="p-4">
-                    <div className="flex justify-between items-center mb-2">
-                      <Label>当前背景图</Label>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() =>
-                          handleUpdate(selected.id, { backgroundImage: null })
-                        }
-                      >
-                        移除
-                      </Button>
-                    </div>
-                    <img
-                      src={selected.backgroundImage}
-                      alt={selected.name}
-                      className="w-full rounded-lg"
-                    />
-                  </Card>
-                )}
+                <div className="flex items-center justify-between">
+                  <Label>生成与历史</Label>
+                  {selected.backgroundImage && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleSetBackground(null)}
+                    >
+                      移除背景图
+                    </Button>
+                  )}
+                </div>
 
                 <ImageGenerator
                   projectId={projectId}
                   initialPrompt={selected.paintingPrompt || ''}
                   onImageGenerated={handleImageGenerated}
+                  highlightImageUrl={selected.backgroundImage}
+                  onSetBackground={(imageUrl) => handleSetBackground(imageUrl)}
                 />
               </div>
             </TabsContent>
