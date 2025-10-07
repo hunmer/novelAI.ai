@@ -7,7 +7,9 @@ const PROMPTS_FILE = path.join(process.cwd(), 'data', 'prompts.json');
 interface Prompt {
   id: string;
   name: string;
-  content: string;
+  content?: string;
+  system?: string;
+  user?: string;
   type: 'world' | 'character' | 'scene' | 'dialog';
   projectId: string;
   createdAt: string;
@@ -48,9 +50,36 @@ export async function PATCH(
       return NextResponse.json({ error: '提示词不存在' }, { status: 404 });
     }
 
+    const updatedPrompt = { ...prompts[index] } as Prompt;
+
+    if (typeof body.name === 'string') {
+      updatedPrompt.name = body.name;
+    }
+
+    if (typeof body.type === 'string') {
+      updatedPrompt.type = body.type;
+    }
+
+    if (typeof body.projectId === 'string') {
+      updatedPrompt.projectId = body.projectId;
+    }
+
+    const resolvedUser =
+      typeof body.user === 'string'
+        ? body.user
+        : typeof body.content === 'string'
+          ? body.content
+          : updatedPrompt.user ?? updatedPrompt.content ?? '';
+
+    const resolvedSystem =
+      typeof body.system === 'string' ? body.system : updatedPrompt.system ?? '';
+
+    updatedPrompt.system = resolvedSystem;
+    updatedPrompt.user = resolvedUser;
+    updatedPrompt.content = resolvedUser;
+
     prompts[index] = {
-      ...prompts[index],
-      ...body,
+      ...updatedPrompt,
       updatedAt: new Date().toISOString(),
     };
 

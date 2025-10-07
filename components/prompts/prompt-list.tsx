@@ -19,7 +19,9 @@ import { PROMPT_TEMPLATES } from '@/lib/ai/prompts';
 interface Prompt {
   id: string;
   name: string;
-  content: string;
+  content?: string;
+  system?: string;
+  user?: string;
   type: 'world' | 'character' | 'scene' | 'dialog';
   projectId: string;
   createdAt: string;
@@ -40,7 +42,8 @@ export function PromptList({ projectId, type }: PromptListProps) {
 
   const [formData, setFormData] = useState({
     name: '',
-    content: '',
+    system: '',
+    user: '',
   });
 
   const [optimizing, setOptimizing] = useState(false);
@@ -78,21 +81,38 @@ export function PromptList({ projectId, type }: PromptListProps) {
 
       // 检查每个默认提示词是否存在，不存在则创建
       for (const prompt of defaultPrompts) {
-        const exists = prompts.some(p => p.name === prompt.name && p.isDefault);
+        const template = PROMPT_TEMPLATES[prompt.template];
+        const existing = prompts.find(
+          (p) => p.name === prompt.name && p.isDefault
+        );
 
-        if (!exists) {
+        if (!existing) {
           await fetch('/api/prompts', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               name: prompt.name,
-              content: PROMPT_TEMPLATES[prompt.template].user,
+              system: template.system,
+              user: template.user,
+              content: template.user,
               type,
               projectId,
               isDefault: true, // 标记为默认提示词
             }),
           });
+          continue;
         }
+
+        await fetch(`/api/prompts/${existing.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            system: template.system,
+            user: template.user,
+            content: template.user,
+            isDefault: true,
+          }),
+        });
       }
 
       // 重新获取提示词列表
@@ -113,7 +133,10 @@ export function PromptList({ projectId, type }: PromptListProps) {
         await fetch(`/api/prompts/${editingPrompt.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(formData),
+          body: JSON.stringify({
+            ...formData,
+            content: formData.user,
+          }),
         });
       } else {
         // 新建
@@ -122,6 +145,7 @@ export function PromptList({ projectId, type }: PromptListProps) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             ...formData,
+            content: formData.user,
             type,
             projectId,
           }),
@@ -150,7 +174,8 @@ export function PromptList({ projectId, type }: PromptListProps) {
   const resetForm = () => {
     setFormData({
       name: '',
-      content: '',
+      system: '',
+      user: '',
     });
     setEditingPrompt(null);
   };
@@ -159,13 +184,14 @@ export function PromptList({ projectId, type }: PromptListProps) {
     setEditingPrompt(prompt);
     setFormData({
       name: prompt.name,
-      content: prompt.content,
+      system: prompt.system ?? '',
+      user: prompt.user ?? prompt.content ?? '',
     });
     setDialogOpen(true);
   };
 
   const handleOptimize = async () => {
-    if (!formData.content.trim()) {
+    if (!formData.user.trim()) {
       alert('请先输入提示词内容');
       return;
     }
@@ -176,7 +202,7 @@ export function PromptList({ projectId, type }: PromptListProps) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt: formData.content,
+          prompt: formData.user,
           type,
         }),
       });
@@ -187,7 +213,7 @@ export function PromptList({ projectId, type }: PromptListProps) {
         // 直接替换输入框内容
         setFormData({
           ...formData,
-          content: data.optimizedPrompt,
+          user: data.optimizedPrompt,
         });
       } else {
         alert(data.error || '优化失败，请稍后重试');
@@ -240,16 +266,28 @@ export function PromptList({ projectId, type }: PromptListProps) {
                 />
               </div>
 
-              <div>
-                <Label htmlFor="content">提示词内容</Label>
-                <Textarea
-                  id="content"
-                  value={formData.content}
-                  onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-                  placeholder="输入提示词内容..."
-                  rows={10}
-                  required
-                />
+              <div className="grid gap-2">
+                <div>
+                  <Label htmlFor="system">System 提示词</Label>
+                  <Textarea
+                    id="system"
+                    value={formData.system}
+                    onChange={(e) => setFormData({ ...formData, system: e.target.value })}
+                    placeholder="输入系统提示词，可为空"
+                    rows={6}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="user">User 提示词</Label>
+                  <Textarea
+                    id="user"
+                    value={formData.user}
+                    onChange={(e) => setFormData({ ...formData, user: e.target.value })}
+                    placeholder="输入用户提示词内容..."
+                    rows={10}
+                    required
+                  />
+                </div>
               </div>
 
               <div className="flex gap-2 justify-between">
@@ -257,7 +295,7 @@ export function PromptList({ projectId, type }: PromptListProps) {
                   type="button"
                   variant="outline"
                   onClick={handleOptimize}
-                  disabled={optimizing || !formData.content.trim()}
+                  disabled={optimizing || !formData.user.trim()}
                   className="gap-2"
                 >
                   <Sparkles className="w-4 h-4" />
@@ -314,9 +352,6 @@ export function PromptList({ projectId, type }: PromptListProps) {
                 </Button>
               </div>
             </div>
-            <p className="text-sm text-muted-foreground line-clamp-3">
-              {prompt.content}
-            </p>
             <div className="text-xs text-muted-foreground mt-2">
               更新时间: {new Date(prompt.updatedAt).toLocaleString('zh-CN')}
             </div>

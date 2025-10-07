@@ -25,7 +25,9 @@ const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
 interface Prompt {
   id: string;
   name: string;
-  content: string;
+  content?: string;
+  system?: string;
+  user?: string;
 }
 
 interface WorldEditorProps {
@@ -96,15 +98,47 @@ export function WorldEditor({ projectId, initialWorld }: WorldEditorProps) {
     setStreamingContent('');
 
     try {
+      const manualPrompt = prompt.trim();
+      const applyReplacements = (template: string, replacements: Record<string, string>) =>
+        template.replace(/%([A-Za-z0-9_]+)%/g, (match, key) => replacements[key] ?? '');
+
+      let finalPrompt = manualPrompt;
+      let resolvedSystem: string | undefined;
+      let templateApplied = false;
+
       // 如果选择了预设提示词，使用预设提示词内容
-      let finalPrompt = prompt;
       if (selectedPromptId) {
         const selectedPrompt = prompts.find((p) => p.id === selectedPromptId);
         if (selectedPrompt) {
-          finalPrompt = prompt
-            ? `${selectedPrompt.content}\n\n${prompt}`
-            : selectedPrompt.content;
+          const presetUser = selectedPrompt.user ?? selectedPrompt.content ?? '';
+          const presetSystem = selectedPrompt.system ?? '';
+          const replacements: Record<string, string> = {
+            input: manualPrompt,
+            worldContext: '',
+          };
+
+          const resolvedPreset = presetUser
+            ? applyReplacements(presetUser, replacements)
+            : '';
+          resolvedSystem = presetSystem
+            ? applyReplacements(presetSystem, replacements)
+            : undefined;
+
+          const hasInputPlaceholder = presetUser.includes('%input%');
+          if (manualPrompt && !hasInputPlaceholder) {
+            finalPrompt = [resolvedPreset, manualPrompt].filter(Boolean).join('\n\n');
+          } else {
+            finalPrompt = resolvedPreset || manualPrompt;
+          }
+
+          templateApplied = true;
         }
+      }
+
+      if (!finalPrompt.trim()) {
+        setIsGenerating(false);
+        setIsStreaming(false);
+        return;
       }
 
       const response = await fetch('/api/ai/world', {
@@ -112,6 +146,8 @@ export function WorldEditor({ projectId, initialWorld }: WorldEditorProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: finalPrompt,
+          systemPrompt: resolvedSystem,
+          templateApplied,
           outputFormat: 'json'
         }),
       });
@@ -158,6 +194,7 @@ export function WorldEditor({ projectId, initialWorld }: WorldEditorProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: combinedPrompt,
+          templateApplied: true,
           outputFormat: 'json'
         }),
       });

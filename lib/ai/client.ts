@@ -6,6 +6,16 @@ import type { IAIResponse } from './types';
 import { logger } from '@/lib/logger/client';
 
 export class AIClient {
+  private static replacePlaceholders(
+    template: string,
+    values: Record<string, string | undefined>
+  ): string {
+    return template.replace(/%([A-Za-z0-9_]+)%/g, (match, key) => {
+      const replacement = values[key];
+      return typeof replacement === 'string' ? replacement : '';
+    });
+  }
+
   private static async executeWithRetry<T>(
     fn: () => Promise<T>,
     retries = AI_CONFIG.maxRetries
@@ -47,6 +57,8 @@ export class AIClient {
       providerId?: string;
       modelName?: string;
       outputFormat?: 'json' | 'markdown';
+      useRawPrompt?: boolean;
+      systemPrompt?: string;
     }
   ): Promise<IAIResponse> {
     const snippetId = logger.startSnippet({
@@ -56,7 +68,41 @@ export class AIClient {
 
     try {
       const template = PROMPT_TEMPLATES[type];
-      const prompt = template.user(userInput, context, options?.outputFormat);
+      const typePlaceholder = type === 'promptOptimize' ? context : type;
+      const trimmedInput = userInput?.trim() ?? '';
+      const containsPlaceholders = /%[A-Za-z0-9_]+%/.test(trimmedInput);
+      const treatAsRaw = !!options?.useRawPrompt || containsPlaceholders;
+      const baseReplacements: Record<string, string | undefined> = {
+        worldContext: context,
+        type: typePlaceholder,
+        outputFormat: options?.outputFormat,
+      };
+
+      const systemSource = options?.systemPrompt ?? template.system;
+
+      let finalPrompt: string;
+
+      if (treatAsRaw) {
+        const rawReplacements = { ...baseReplacements, input: undefined };
+        const replaced = this.replacePlaceholders(userInput, rawReplacements);
+        finalPrompt = replaced.trim().length ? replaced : userInput;
+      } else {
+        const templateUser = template.user;
+        const replacementsWithInput = { ...baseReplacements, input: trimmedInput };
+        const templateHasInput = templateUser.includes('%input%');
+
+        let composedPrompt = this.replacePlaceholders(templateUser, replacementsWithInput);
+        if (!templateHasInput && trimmedInput) {
+          composedPrompt = [composedPrompt, trimmedInput].filter(Boolean).join('\n\n');
+        }
+
+        finalPrompt = composedPrompt.trim().length ? composedPrompt : trimmedInput;
+      }
+
+      const systemPrompt = this.replacePlaceholders(systemSource, {
+        ...baseReplacements,
+        input: trimmedInput,
+      });
 
       // 获取模型
       let model: LanguageModel;
@@ -73,10 +119,10 @@ export class AIClient {
 
       if (snippetId) {
         await logger.logSnippet(
-          `开始生成: ${type}, 输入长度: ${userInput.length}`,
+          `开始生成: ${type}, 输入长度: ${finalPrompt.length}`,
           snippetId,
           'ai-client',
-          { type, inputLength: userInput.length, hasContext: !!context }
+          { type, inputLength: finalPrompt.length, hasContext: !!context }
         );
       }
 
@@ -90,8 +136,8 @@ export class AIClient {
       const result = await this.executeWithRetry(async () => {
         const aiResult = await generateText({
           model,
-          system: template.system,
-          prompt,
+          system: systemPrompt,
+          prompt: finalPrompt,
           temperature: AI_CONFIG.defaultTemperature,
         });
 
@@ -148,6 +194,8 @@ export class AIClient {
       providerId?: string;
       modelName?: string;
       outputFormat?: 'json' | 'markdown';
+      useRawPrompt?: boolean;
+      systemPrompt?: string;
     }
   ) {
     const snippetId = logger.startSnippet({
@@ -157,7 +205,41 @@ export class AIClient {
 
     try {
       const template = PROMPT_TEMPLATES[type];
-      const prompt = template.user(userInput, context, options?.outputFormat);
+      const typePlaceholder = type === 'promptOptimize' ? context : type;
+      const trimmedInput = userInput?.trim() ?? '';
+      const containsPlaceholders = /%[A-Za-z0-9_]+%/.test(trimmedInput);
+      const treatAsRaw = !!options?.useRawPrompt || containsPlaceholders;
+      const baseReplacements: Record<string, string | undefined> = {
+        worldContext: context,
+        type: typePlaceholder,
+        outputFormat: options?.outputFormat,
+      };
+
+      const systemSource = options?.systemPrompt ?? template.system;
+
+      let finalPrompt: string;
+
+      if (treatAsRaw) {
+        const rawReplacements = { ...baseReplacements, input: undefined };
+        const replaced = this.replacePlaceholders(userInput, rawReplacements);
+        finalPrompt = replaced.trim().length ? replaced : userInput;
+      } else {
+        const templateUser = template.user;
+        const replacementsWithInput = { ...baseReplacements, input: trimmedInput };
+        const templateHasInput = templateUser.includes('%input%');
+
+        let composedPrompt = this.replacePlaceholders(templateUser, replacementsWithInput);
+        if (!templateHasInput && trimmedInput) {
+          composedPrompt = [composedPrompt, trimmedInput].filter(Boolean).join('\n\n');
+        }
+
+        finalPrompt = composedPrompt.trim().length ? composedPrompt : trimmedInput;
+      }
+
+      const systemPrompt = this.replacePlaceholders(systemSource, {
+        ...baseReplacements,
+        input: trimmedInput,
+      });
 
       // 获取模型
       let model: LanguageModel;
@@ -174,24 +256,26 @@ export class AIClient {
 
       if (snippetId) {
         await logger.logSnippet(
-          `开始流式生成: ${type}, 输入长度: ${userInput.length}`,
+          `开始流式生成: ${type}, 输入长度: ${finalPrompt.length}`,
           snippetId,
           'ai-client',
-          { type, inputLength: userInput.length, hasContext: !!context }
+          { type, inputLength: finalPrompt.length, hasContext: !!context }
         );
       }
 
       await logger.debug(`AI 流式生成请求: ${type}`, 'ai-client', {
         type,
         model: model.modelId,
+        system: systemPrompt,
+        prompt: finalPrompt,
         temperature: AI_CONFIG.defaultTemperature,
         maxTokens: AI_CONFIG.maxTokens,
       });
 
       const stream = streamText({
         model,
-        system: template.system,
-        prompt,
+        system: systemPrompt,
+        prompt: finalPrompt,
         temperature: AI_CONFIG.defaultTemperature,
       });
 

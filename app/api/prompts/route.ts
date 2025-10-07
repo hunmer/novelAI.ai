@@ -8,7 +8,9 @@ const PROMPTS_FILE = path.join(process.cwd(), 'data', 'prompts.json');
 interface Prompt {
   id: string;
   name: string;
-  content: string;
+  content?: string;
+  system?: string;
+  user?: string;
   type: 'world' | 'character' | 'scene' | 'dialog';
   projectId: string;
   createdAt: string;
@@ -56,7 +58,17 @@ export async function GET(request: NextRequest) {
       prompts = prompts.filter((p) => p.type === type);
     }
 
-    return NextResponse.json({ prompts });
+    const normalized = prompts.map((prompt) => {
+      const fallbackUser = typeof prompt.user === 'string' ? prompt.user : prompt.content ?? '';
+      return {
+        ...prompt,
+        system: typeof prompt.system === 'string' ? prompt.system : '',
+        user: fallbackUser,
+        content: typeof prompt.content === 'string' ? prompt.content : fallbackUser,
+      } satisfies Prompt;
+    });
+
+    return NextResponse.json({ prompts: normalized });
   } catch (error) {
     console.error('获取提示词失败:', error);
     return NextResponse.json({ error: '获取提示词失败' }, { status: 500 });
@@ -66,9 +78,12 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, content, type, projectId, isDefault } = body;
+    const { name, content, system, user, type, projectId, isDefault } = body;
 
-    if (!name || !content || !type || !projectId) {
+    const resolvedUser = typeof user === 'string' ? user : typeof content === 'string' ? content : '';
+    const resolvedSystem = typeof system === 'string' ? system : '';
+
+    if (!name || !resolvedUser || !type || !projectId) {
       return NextResponse.json({ error: '缺少必要字段' }, { status: 400 });
     }
 
@@ -76,7 +91,9 @@ export async function POST(request: NextRequest) {
     const newPrompt: Prompt = {
       id: nanoid(),
       name,
-      content,
+      content: resolvedUser,
+      system: resolvedSystem,
+      user: resolvedUser,
       type,
       projectId,
       createdAt: new Date().toISOString(),
