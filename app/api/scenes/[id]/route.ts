@@ -23,11 +23,14 @@ export async function PATCH(
         ...(updates.backgroundImage !== undefined && {
           backgroundImage: updates.backgroundImage,
         }),
+        ...(updates.backgroundThumbnail !== undefined && {
+          backgroundThumbnail: updates.backgroundThumbnail,
+        }),
       },
     });
 
     return NextResponse.json(scene);
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       { error: 'Failed to update scene' },
       { status: 500 }
@@ -44,7 +47,7 @@ export async function DELETE(
     const { id } = await params;
     await prisma.scene.delete({ where: { id } });
     return NextResponse.json({ success: true });
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       { error: 'Failed to delete scene' },
       { status: 500 }

@@ -18,6 +18,7 @@ interface Scene {
   description: string | null;
   paintingPrompt: string | null;
   backgroundImage: string | null;
+  backgroundThumbnail: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -141,15 +142,28 @@ export function SceneEditor({ projectId, worldContext }: SceneEditorProps) {
     }
   };
 
-  const handleImageGenerated = (imageUrl: string) => {
+  const handleImageGenerated = (
+    imageUrl: string,
+    _imageId: string,
+    thumbnailUrl?: string
+  ) => {
     if (selectedId) {
-      handleUpdate(selectedId, { backgroundImage: imageUrl });
+      handleUpdate(selectedId, {
+        backgroundImage: imageUrl,
+        backgroundThumbnail: thumbnailUrl ?? null,
+      });
     }
   };
 
-  const handleSetBackground = (imageUrl: string | null) => {
+  const handleSetBackground = (
+    imageUrl: string | null,
+    thumbnailUrl?: string | null
+  ) => {
     if (!selectedId) return;
-    handleUpdate(selectedId, { backgroundImage: imageUrl });
+    handleUpdate(selectedId, {
+      backgroundImage: imageUrl,
+      backgroundThumbnail: thumbnailUrl ?? null,
+    });
   };
 
   const selected = scenes.find((s) => s.id === selectedId);
@@ -188,7 +202,7 @@ export function SceneEditor({ projectId, worldContext }: SceneEditorProps) {
                 <div className="h-12 w-12 overflow-hidden rounded-md border bg-muted">
                   {scene.backgroundImage ? (
                     <img
-                      src={scene.backgroundImage}
+                      src={scene.backgroundThumbnail || scene.backgroundImage}
                       alt={`${scene.name} 缩略图`}
                       className="h-full w-full object-cover"
                     />
@@ -290,10 +304,14 @@ export function SceneEditor({ projectId, worldContext }: SceneEditorProps) {
 
                 <ImageGenerator
                   projectId={projectId}
+                  sceneId={selected.id}
                   initialPrompt={selected.paintingPrompt || ''}
                   onImageGenerated={handleImageGenerated}
                   highlightImageUrl={selected.backgroundImage}
-                  onSetBackground={(imageUrl) => handleSetBackground(imageUrl)}
+                  highlightThumbnailUrl={selected.backgroundThumbnail}
+                  onSetBackground={(imageUrl, thumbnailUrl) =>
+                    handleSetBackground(imageUrl, thumbnailUrl)
+                  }
                 />
               </div>
             </TabsContent>

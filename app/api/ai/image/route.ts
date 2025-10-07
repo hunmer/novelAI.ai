@@ -4,6 +4,13 @@ import { PrismaClient, Prisma } from '@prisma/client';
 import { logger } from '@/lib/logger/client';
 import OpenAI from 'openai';
 import { ProxyAgent } from 'undici';
+import { randomUUID } from 'crypto';
+import {
+  persistImage,
+  removeImageIfExists,
+  resolveImageExtension,
+} from '@/lib/server/image-storage';
+import type { StoredImageInfo } from '@/lib/server/image-storage';
 
 const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
 const customFetch = proxyUrl
@@ -22,7 +29,7 @@ export async function POST(req: NextRequest) {
   });
 
   try {
-    const { prompt, providerId, model, projectId } = await req.json();
+    const { prompt, providerId, model, projectId, sceneId, characterId } = await req.json();
 
     if (snippetId) {
       await logger.logSnippet(
@@ -81,25 +88,56 @@ export async function POST(req: NextRequest) {
       size: '1024x1024',
     });
 
-    const imageUrl = response.data[0]?.url;
-    if (!imageUrl) {
+    const remoteImageUrl = response.data[0]?.url;
+    if (!remoteImageUrl) {
       throw new Error('图片生成失败：未返回图片URL');
     }
 
-    // 保存生成记录到数据库
-    const generatedImage = await prisma.generatedImage.create({
-      data: {
-        projectId: projectId || null,
-        prompt,
-        modelProvider: provider.name,
-        modelName: modelConfig.name,
-        imageUrl,
-        metadata: JSON.stringify({
-          size: '1024x1024',
-          providerId: provider.id,
-        }),
-      },
-    });
+    const downloadResponse = await fetch(remoteImageUrl);
+    if (!downloadResponse.ok) {
+      throw new Error('图片生成失败：下载远程图片失败');
+    }
+
+    const contentType = downloadResponse.headers.get('content-type') || undefined;
+    const extension = resolveImageExtension(contentType);
+    const imageBuffer = Buffer.from(await downloadResponse.arrayBuffer());
+
+    const imageId = randomUUID();
+    const fileName = `${imageId}.${extension}`;
+
+    let storedOriginal: StoredImageInfo | undefined;
+    try {
+      storedOriginal = await persistImage(imageBuffer, fileName, 'original');
+    } catch {
+      throw new Error('图片生成失败：保存原图到本地时出错');
+    }
+
+    let generatedImage;
+    try {
+      generatedImage = await prisma.generatedImage.create({
+        data: {
+          id: imageId,
+          projectId: projectId || null,
+          sceneId: sceneId || null,
+          characterId: characterId || null,
+          prompt,
+          modelProvider: provider.name,
+          modelName: modelConfig.name,
+          imageUrl: storedOriginal.publicPath,
+          thumbnailUrl: null,
+          metadata: JSON.stringify({
+            size: '1024x1024',
+            providerId: provider.id,
+            contentType,
+            fileSize: imageBuffer.byteLength,
+            remoteUrl: remoteImageUrl,
+          }),
+        },
+      });
+    } catch (error) {
+      await removeImageIfExists(storedOriginal?.publicPath);
+      throw error;
+    }
 
     if (snippetId) {
       await logger.logSnippet('图片生成完成', snippetId, 'ai-image');
@@ -108,7 +146,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      imageUrl,
+      imageUrl: generatedImage.imageUrl,
+      thumbnailUrl: generatedImage.thumbnailUrl,
       id: generatedImage.id,
     });
   } catch (error) {
@@ -139,9 +178,18 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const projectId = searchParams.get('projectId');
+    const sceneId = searchParams.get('sceneId');
+    const characterId = searchParams.get('characterId');
     const limit = parseInt(searchParams.get('limit') || '20');
 
-    const where = projectId ? { projectId } : {};
+    const where: any = {};
+    if (characterId) {
+      where.characterId = characterId;
+    } else if (sceneId) {
+      where.sceneId = sceneId;
+    } else if (projectId) {
+      where.projectId = projectId;
+    }
 
     const images = await prisma.generatedImage.findMany({
       where,
@@ -150,7 +198,7 @@ export async function GET(req: NextRequest) {
     });
 
     return NextResponse.json({ images });
-  } catch (_error) {
+  } catch {
     return NextResponse.json(
       { error: 'Failed to fetch image history' },
       { status: 500 }
@@ -167,7 +215,17 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: '缺少图片记录ID' }, { status: 400 });
     }
 
-    await prisma.generatedImage.delete({ where: { id } });
+    const deleted = await prisma.generatedImage.delete({ where: { id } });
+
+    try {
+      await removeImageIfExists(deleted.imageUrl);
+      await removeImageIfExists(deleted.thumbnailUrl);
+    } catch (fileError) {
+      await logger.warn(
+        `删除图片文件失败: ${fileError instanceof Error ? fileError.message : '未知错误'}`,
+        'ai-image'
+      );
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

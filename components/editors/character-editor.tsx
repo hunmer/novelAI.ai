@@ -6,6 +6,8 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { MarkdownEditor } from '@/components/ui/markdown-editor';
 import { Card } from '@/components/ui/card';
+import { Label } from '@/components/ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   getCharacters,
   updateCharacter,
@@ -14,6 +16,7 @@ import {
 import { SparklesIcon, PlusIcon, TrashIcon } from 'lucide-react';
 import type { Character } from '@prisma/client';
 import { Typewriter } from '@/components/ui/typewriter';
+import { ImageGenerator } from '@/components/image/image-generator';
 
 interface CharacterEditorProps {
   projectId: string;
@@ -91,6 +94,30 @@ export function CharacterEditor({ projectId, worldContext }: CharacterEditorProp
     await loadCharacters();
   };
 
+  const handleImageGenerated = (
+    imageUrl: string,
+    _imageId: string,
+    thumbnailUrl?: string
+  ) => {
+    if (selectedId) {
+      handleUpdate(selectedId, {
+        portraitImage: imageUrl,
+        portraitThumbnail: thumbnailUrl ?? null,
+      });
+    }
+  };
+
+  const handleSetPortrait = (
+    imageUrl: string | null,
+    thumbnailUrl?: string | null
+  ) => {
+    if (!selectedId) return;
+    handleUpdate(selectedId, {
+      portraitImage: imageUrl,
+      portraitThumbnail: thumbnailUrl ?? null,
+    });
+  };
+
   const handleDelete = async (id: string) => {
     await deleteCharacter(id);
     await loadCharacters();
@@ -100,8 +127,8 @@ export function CharacterEditor({ projectId, worldContext }: CharacterEditorProp
   const selected = characters.find((c) => c.id === selectedId);
 
   return (
-    <div className="grid grid-cols-3 gap-4">
-      <div className="col-span-1 space-y-4">
+    <div className="grid grid-cols-[300px_1fr_400px] gap-4">
+      <div className="space-y-4">
         <Card className="p-4">
           <div className="space-y-2">
             <Textarea
@@ -145,7 +172,7 @@ export function CharacterEditor({ projectId, worldContext }: CharacterEditorProp
         </div>
       </div>
 
-      <div className="col-span-2">
+      <div>
         {isStreaming ? (
           <Card className="p-4 space-y-4">
             <div className="text-sm font-medium">正在生成角色...</div>
@@ -155,19 +182,70 @@ export function CharacterEditor({ projectId, worldContext }: CharacterEditorProp
           </Card>
         ) : selected ? (
           <Card className="p-4 space-y-4">
-            <Input
-              value={selected.name}
-              onChange={(e) => handleUpdate(selected.id, { name: e.target.value })}
-            />
-            <MarkdownEditor
-              value={selected.attributes}
-              onChange={(value) => handleUpdate(selected.id, { attributes: value })}
-              rows={20}
-            />
+            <div>
+              <Label htmlFor="character-name">角色名称</Label>
+              <Input
+                id="character-name"
+                value={selected.name}
+                onChange={(e) => handleUpdate(selected.id, { name: e.target.value })}
+              />
+            </div>
+            <div>
+              <Label htmlFor="character-attrs">角色属性（Markdown）</Label>
+              <MarkdownEditor
+                id="character-attrs"
+                value={selected.attributes}
+                onChange={(value) => handleUpdate(selected.id, { attributes: value })}
+                rows={20}
+              />
+            </div>
           </Card>
         ) : (
           <Card className="p-12 text-center text-muted-foreground">
             选择或生成一个角色
+          </Card>
+        )}
+      </div>
+
+      <div>
+        {selected && !isStreaming ? (
+          <Tabs defaultValue="portrait">
+            <TabsList className="mb-4 w-full">
+              <TabsTrigger value="portrait" className="flex-1">角色插画</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="portrait">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <Label>生成与历史</Label>
+                  {selected.portraitImage && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleSetPortrait(null)}
+                    >
+                      移除插画
+                    </Button>
+                  )}
+                </div>
+
+                <ImageGenerator
+                  projectId={projectId}
+                  characterId={selected.id}
+                  initialPrompt={selected.paintingPrompt || ''}
+                  onImageGenerated={handleImageGenerated}
+                  highlightImageUrl={selected.portraitImage}
+                  highlightThumbnailUrl={selected.portraitThumbnail}
+                  onSetBackground={(imageUrl, thumbnailUrl) =>
+                    handleSetPortrait(imageUrl, thumbnailUrl)
+                  }
+                />
+              </div>
+            </TabsContent>
+          </Tabs>
+        ) : (
+          <Card className="p-12 text-center text-muted-foreground">
+            {isStreaming ? '生成中...' : '选择一个角色查看详情'}
           </Card>
         )}
       </div>

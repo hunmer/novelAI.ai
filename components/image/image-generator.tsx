@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import imageCompression from 'browser-image-compression';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card } from '@/components/ui/card';
@@ -24,7 +25,6 @@ import Captions from 'yet-another-react-lightbox/plugins/captions';
 import Zoom from 'yet-another-react-lightbox/plugins/zoom';
 import 'yet-another-react-lightbox/styles.css';
 import 'yet-another-react-lightbox/plugins/captions.css';
-import 'yet-another-react-lightbox/plugins/zoom.css';
 
 interface ProviderModel {
   name: string;
@@ -46,6 +46,7 @@ interface GeneratedImage {
   modelProvider: string;
   modelName: string;
   createdAt: string;
+  thumbnailUrl: string | null;
 }
 
 interface GalleryImage extends GeneratedImage {
@@ -55,17 +56,27 @@ interface GalleryImage extends GeneratedImage {
 
 interface ImageGeneratorProps {
   projectId?: string;
+  sceneId?: string;
+  characterId?: string;
   initialPrompt?: string;
-  onImageGenerated?: (imageUrl: string, imageId: string) => void;
+  onImageGenerated?: (
+    imageUrl: string,
+    imageId: string,
+    thumbnailUrl?: string | null
+  ) => void;
   highlightImageUrl?: string | null;
-  onSetBackground?: (imageUrl: string) => void;
+  highlightThumbnailUrl?: string | null;
+  onSetBackground?: (imageUrl: string, thumbnailUrl?: string | null) => void;
 }
 
 export function ImageGenerator({
   projectId,
+  sceneId,
+  characterId,
   initialPrompt = '',
   onImageGenerated,
   highlightImageUrl,
+  highlightThumbnailUrl,
   onSetBackground,
 }: ImageGeneratorProps) {
   const [prompt, setPrompt] = useState(initialPrompt);
@@ -123,16 +134,70 @@ export function ImageGenerator({
   // 加载图片生成历史
   const fetchImageHistory = useCallback(async () => {
     try {
-      const url = projectId
-        ? `/api/ai/image?projectId=${projectId}&limit=10`
-        : '/api/ai/image?limit=10';
+      let url = '/api/ai/image?limit=10';
+      if (characterId) {
+        url = `/api/ai/image?characterId=${characterId}&limit=10`;
+      } else if (sceneId) {
+        url = `/api/ai/image?sceneId=${sceneId}&limit=10`;
+      } else if (projectId) {
+        url = `/api/ai/image?projectId=${projectId}&limit=10`;
+      }
       const res = await fetch(url);
       const data = await res.json();
       setImageHistory(data.images || []);
     } catch (error) {
       console.error('获取图片历史失败:', error);
     }
-  }, [projectId]);
+  }, [projectId, sceneId, characterId]);
+
+  const createAndUploadThumbnail = useCallback(
+    async (imageId: string, originalUrl: string) => {
+      try {
+        const response = await fetch(originalUrl);
+        if (!response.ok) {
+          throw new Error('加载原图失败');
+        }
+
+        const sourceBlob = await response.blob();
+        const compressed = await imageCompression(sourceBlob, {
+          maxWidthOrHeight: 256,
+          maxSizeMB: 0.3,
+          useWebWorker: true,
+          fileType: 'image/jpeg',
+        });
+
+        const fallbackName = `${imageId}.jpg`;
+        const payloadFile =
+          compressed instanceof File
+            ? compressed
+            : new File([compressed], fallbackName, { type: 'image/jpeg' });
+
+        const formData = new FormData();
+        formData.append('imageId', imageId);
+        formData.append(
+          'thumbnail',
+          payloadFile,
+          payloadFile.name || fallbackName
+        );
+
+        const uploadResponse = await fetch('/api/ai/image/thumbnail', {
+          method: 'POST',
+          body: formData,
+        });
+
+        const payload = await uploadResponse.json();
+        if (!uploadResponse.ok) {
+          throw new Error(payload.error || '上传缩略图失败');
+        }
+
+        return payload.thumbnailUrl as string;
+      } catch (error) {
+        console.error('生成缩略图失败:', error);
+        return undefined;
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     fetchImageHistory();
@@ -144,11 +209,15 @@ export function ImageGenerator({
     }
 
     if (!highlightImageUrl) {
-      return imageHistory.map((img) => ({ ...img }));
+      return imageHistory.map((img) => ({
+        ...img,
+        thumbnailUrl: img.thumbnailUrl || img.imageUrl,
+      }));
     }
 
     const historyWithFlag = imageHistory.map<GalleryImage>((img) => ({
       ...img,
+      thumbnailUrl: img.thumbnailUrl || img.imageUrl,
       isCurrentBackground: img.imageUrl === highlightImageUrl,
     }));
 
@@ -167,12 +236,13 @@ export function ImageGenerator({
         modelProvider: '',
         modelName: '',
         createdAt: '',
+        thumbnailUrl: highlightThumbnailUrl ?? highlightImageUrl,
         isCurrentBackground: true,
         isSynthetic: true,
       },
       ...historyWithFlag,
     ];
-  }, [imageHistory, highlightImageUrl]);
+  }, [imageHistory, highlightImageUrl, highlightThumbnailUrl]);
 
   const slides = useMemo(
     () =>
@@ -193,7 +263,7 @@ export function ImageGenerator({
     if (!onSetBackground) return;
     const target = displayedImages[activeSlide];
     if (!target || target.isCurrentBackground) return;
-    onSetBackground(target.imageUrl);
+    onSetBackground(target.imageUrl, target.thumbnailUrl || target.imageUrl);
     setGeneratedImageUrl(target.imageUrl);
     setIsLightboxOpen(false);
   }, [activeSlide, displayedImages, onSetBackground]);
@@ -233,6 +303,8 @@ export function ImageGenerator({
           providerId: selectedProviderId,
           model: selectedModel,
           projectId,
+          sceneId,
+          characterId,
         }),
       });
 
@@ -240,10 +312,17 @@ export function ImageGenerator({
 
       if (data.success) {
         setGeneratedImageUrl(data.imageUrl);
-        fetchImageHistory(); // 刷新历史记录
+
+        let thumbnailUrl: string | null = data.thumbnailUrl ?? null;
+        if (!thumbnailUrl) {
+          thumbnailUrl =
+            (await createAndUploadThumbnail(data.id, data.imageUrl)) ?? null;
+        }
+
+        await fetchImageHistory();
 
         if (onImageGenerated) {
-          onImageGenerated(data.imageUrl, data.id);
+          onImageGenerated(data.imageUrl, data.id, thumbnailUrl);
         }
       } else {
         throw new Error(data.error || '图片生成失败');
@@ -386,7 +465,7 @@ export function ImageGenerator({
                 }}
               >
                 <img
-                  src={img.imageUrl}
+                  src={img.thumbnailUrl || img.imageUrl}
                   alt={img.prompt}
                   className="w-full aspect-square object-cover rounded-lg"
                 />

@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
     });
 
     return NextResponse.json({ scenes });
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       { error: 'Failed to fetch scenes' },
       { status: 500 }
@@ -30,7 +30,14 @@ export async function GET(req: NextRequest) {
 // 创建场景
 export async function POST(req: NextRequest) {
   try {
-    const { projectId, name, description, paintingPrompt, backgroundImage } =
+    const {
+      projectId,
+      name,
+      description,
+      paintingPrompt,
+      backgroundImage,
+      backgroundThumbnail,
+    } =
       await req.json();
 
     if (!projectId || !name) {
@@ -47,11 +54,12 @@ export async function POST(req: NextRequest) {
         description: description || null,
         paintingPrompt: paintingPrompt || null,
         backgroundImage: backgroundImage || null,
+        backgroundThumbnail: backgroundThumbnail || null,
       },
     });
 
     return NextResponse.json(scene);
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       { error: 'Failed to create scene' },
       { status: 500 }
