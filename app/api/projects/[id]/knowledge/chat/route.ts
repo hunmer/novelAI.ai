@@ -4,7 +4,10 @@ import {
   getDefaultLanguageModel,
   getEmbeddingModel,
 } from '@/lib/ai/dynamic-config';
-import { searchKnowledgeEntries } from '@/lib/actions/knowledge.actions';
+import {
+  appendKnowledgeChatMessages,
+  searchKnowledgeEntries,
+} from '@/lib/actions/knowledge.actions';
 import { logger } from '@/lib/logger/client';
 
 export async function POST(
@@ -14,7 +17,17 @@ export async function POST(
   let snippetId: string | null = null;
   try {
     const { id: projectId } = await params;
-    const { messages } = await req.json();
+    const {
+      messages,
+      sessionId,
+      trigger,
+      messageId,
+    }: {
+      messages: unknown;
+      sessionId?: string;
+      trigger?: string;
+      messageId?: string;
+    } = await req.json();
 
     snippetId = logger.startSnippet({
       snippet_id: `knowledge-chat-${projectId}-${Date.now()}`,
@@ -29,6 +42,9 @@ export async function POST(
       await logger.logSnippet('收到知识库对话请求', snippetId, 'knowledge-chat', {
         projectId,
         messageCount: messages.length,
+        sessionId,
+        trigger,
+        messageId,
       });
     }
 
@@ -55,7 +71,9 @@ export async function POST(
 
     const userInput = extractText(lastUserMessage);
 
-    if (!userInput.trim()) {
+    const normalizedUserInput = userInput.trim();
+
+    if (!normalizedUserInput) {
       return NextResponse.json({ error: '缺少用户输入' }, { status: 400 });
     }
 
@@ -72,7 +90,7 @@ export async function POST(
 
     const { embedding } = await embed({
       model: embeddingInfo.model,
-      value: userInput,
+      value: normalizedUserInput,
     });
 
     const relatedEntries = await searchKnowledgeEntries(
@@ -94,6 +112,22 @@ export async function POST(
         `片段${index + 1} (相似度 ${entry.similarity.toFixed(3)}):\n${entry.content}`
       )
       .join('\n\n');
+
+    const relatedEntrySummaries = relatedEntries.map((entry, index) => ({
+      order: index + 1,
+      entryId: entry.id,
+      similarity: entry.similarity,
+      title:
+        typeof entry.metadata?.title === 'string' ? entry.metadata.title : undefined,
+      preview: entry.content.slice(0, 160),
+    }));
+
+    await logger.info('知识库检索详细结果', 'knowledge-chat', {
+      projectId,
+      sessionId,
+      userInputLength: normalizedUserInput.length,
+      relatedEntries: relatedEntrySummaries,
+    });
 
     const systemPrompt = `你是一名知识库助手，请结合知识库内容回答用户问题。` +
       (context
@@ -122,6 +156,39 @@ export async function POST(
     const result = streamText({
       model: textModelInfo.model,
       messages: [{ role: 'system', content: systemPrompt }, ...normalizedMessages],
+      onFinish: async (event) => {
+        try {
+          const assistantReply = event.text?.trim() ?? '';
+          const usage = event.totalUsage;
+
+          await logger.info('知识库对话生成完成', 'knowledge-chat', {
+            projectId,
+            sessionId,
+            tokenUsage: usage?.tokens,
+            finishReason: event.finishReason,
+            responsePreview: assistantReply.slice(0, 160),
+          });
+
+          if (sessionId && assistantReply) {
+            await appendKnowledgeChatMessages(projectId, sessionId, [
+              {
+                id: event.message?.id,
+                role: 'assistant',
+                content: assistantReply,
+              },
+            ]);
+          }
+        } catch (persistError) {
+          const message =
+            persistError instanceof Error
+              ? persistError.message
+              : '记录知识库对话历史失败';
+          await logger.error(message, 'knowledge-chat', {
+            projectId,
+            sessionId,
+          });
+        }
+      },
     });
 
     if (snippetId) {
@@ -132,7 +199,7 @@ export async function POST(
       await logger.endSnippet(snippetId);
     }
 
-    return result.toAIStreamResponse();
+    return result.toUIMessageStreamResponse();
   } catch (error) {
     const message =
       error instanceof Error ? error.message : '知识库对话失败';

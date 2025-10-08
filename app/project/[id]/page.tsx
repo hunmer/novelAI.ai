@@ -29,7 +29,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           tags: parseProjectTags(project.tags),
         }}
       />
-      <div className="container py-6">
+      <div className="w-full p-3">
         <Tabs defaultValue="world">
           <TabsList className="mb-6">
             <TabsTrigger value="world">世界观</TabsTrigger>

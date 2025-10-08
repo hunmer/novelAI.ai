@@ -20,6 +20,22 @@ export interface KnowledgeSearchResult extends KnowledgeEntry {
   similarity: number;
 }
 
+export interface KnowledgeChatSession {
+  id: string;
+  projectId: string;
+  title: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface KnowledgeChatMessage {
+  id: string;
+  sessionId: string;
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: Date;
+}
+
 function parseEmbedding(payload: string | null): number[] {
   if (!payload) return [];
   try {
@@ -198,6 +214,118 @@ export async function searchKnowledgeEntries(
     .filter((result) => result.similarity > 0)
     .sort((a, b) => b.similarity - a.similarity)
     .slice(0, topK);
+}
+
+export async function listKnowledgeChatSessions(
+  projectId: string
+): Promise<KnowledgeChatSession[]> {
+  const sessions = await prisma.knowledgeChatSession.findMany({
+    where: { projectId },
+    orderBy: { updatedAt: 'desc' },
+  });
+
+  return sessions.map((session) => ({
+    id: session.id,
+    projectId: session.projectId,
+    title: session.title,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+  }));
+}
+
+export async function createKnowledgeChatSession(
+  projectId: string,
+  title?: string
+): Promise<KnowledgeChatSession> {
+  const trimmedTitle = title?.trim();
+
+  const session = await prisma.knowledgeChatSession.create({
+    data: {
+      projectId,
+      ...(trimmedTitle ? { title: trimmedTitle } : {}),
+    },
+  });
+
+  return {
+    id: session.id,
+    projectId: session.projectId,
+    title: session.title,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+  };
+}
+
+export async function getKnowledgeChatMessages(
+  projectId: string,
+  sessionId: string,
+  limit = 100
+): Promise<KnowledgeChatMessage[]> {
+  const session = await prisma.knowledgeChatSession.findUnique({
+    where: { id: sessionId },
+    select: { projectId: true },
+  });
+
+  if (!session || session.projectId !== projectId) {
+    throw new Error('知识库对话会话不存在或不属于当前项目');
+  }
+
+  const records = await prisma.knowledgeChatMessage.findMany({
+    where: { sessionId },
+    orderBy: { createdAt: 'asc' },
+    take: limit,
+  });
+
+  return records.map((record) => ({
+    id: record.id,
+    sessionId: record.sessionId,
+    role: record.role as 'user' | 'assistant',
+    content: record.content,
+    createdAt: record.createdAt,
+  }));
+}
+
+export async function appendKnowledgeChatMessages(
+  projectId: string,
+  sessionId: string,
+  messages: Array<{ id?: string; role: 'user' | 'assistant'; content: string }>
+): Promise<void> {
+  if (!messages.length) return;
+
+  const session = await prisma.knowledgeChatSession.findUnique({
+    where: { id: sessionId },
+    select: { projectId: true },
+  });
+
+  if (!session || session.projectId !== projectId) {
+    throw new Error('知识库对话会话不存在或不属于当前项目');
+  }
+
+  const sanitized = messages
+    .map((message) => ({
+      id: message.id,
+      role: message.role,
+      content: message.content.trim(),
+    }))
+    .filter((message) => message.content.length > 0);
+
+  if (!sanitized.length) {
+    return;
+  }
+
+  await prisma.knowledgeChatMessage.createMany({
+    data: sanitized.map((message) => ({
+      id: message.id,
+      sessionId,
+      role: message.role,
+      content: message.content,
+    })),
+    skipDuplicates: true,
+  });
+
+  await prisma.knowledgeChatSession.update({
+    where: { id: sessionId },
+    data: { updatedAt: new Date() },
+  });
 }
 
 interface ImportOptions {

@@ -7,7 +7,6 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,6 +25,14 @@ import { Loader2, MessageCircle, Pencil, Plus, Send, Trash2, X } from 'lucide-re
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ImportSettingsDialog } from '@/components/dialogs/import-settings-dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { logger } from '@/lib/logger/client';
 
 interface KnowledgeEntry {
   id: string;
@@ -36,6 +43,19 @@ interface KnowledgeEntry {
 
 interface KnowledgeBaseTabProps {
   projectId: string;
+}
+
+interface KnowledgeChatSessionSummary {
+  id: string;
+  title: string;
+  updatedAt: string;
+}
+
+interface KnowledgeChatHistoryMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: string;
 }
 
 export function KnowledgeBaseTab({ projectId }: KnowledgeBaseTabProps) {
@@ -50,7 +70,14 @@ export function KnowledgeBaseTab({ projectId }: KnowledgeBaseTabProps) {
   const [editingEntry, setEditingEntry] = useState<KnowledgeEntry | null>(null);
   const [draftMetadata, setDraftMetadata] = useState<Record<string, unknown>>({});
   const [chatInput, setChatInput] = useState('');
+  const [sessions, setSessions] = useState<KnowledgeChatSessionSummary[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [loadingSessions, setLoadingSessions] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [creatingSession, setCreatingSession] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
+  const persistedMessageIdsRef = useRef<Set<string>>(new Set());
+  const previousMessageIdsRef = useRef<string[]>([]);
 
   const chatTransport = useMemo(
     () =>
@@ -106,6 +133,361 @@ export function KnowledgeBaseTab({ projectId }: KnowledgeBaseTabProps) {
   useEffect(() => {
     fetchEntries();
   }, [fetchEntries]);
+
+  const extractTextFromMessage = useCallback((message: unknown): string => {
+    const candidate = message as {
+      parts?: Array<{ type?: string; text?: string }>;
+      content?: unknown;
+    };
+
+    let textContent =
+      candidate.parts
+        ?.map((part) => (part?.type === 'text' ? part.text ?? '' : ''))
+        .filter(Boolean)
+        .join('\n') ?? '';
+
+    if (!textContent) {
+      if (typeof candidate.content === 'string') {
+        textContent = candidate.content;
+      } else if (Array.isArray(candidate.content)) {
+        textContent = candidate.content
+          .map((item) =>
+            item && typeof item === 'object' && 'type' in item && item.type === 'text'
+              ? ((item as { text?: string }).text ?? '')
+              : ''
+          )
+          .filter(Boolean)
+          .join('\n');
+      }
+    }
+
+    return textContent;
+  }, []);
+
+  const isMessageComplete = useCallback((message: { role: string; parts?: unknown }): boolean => {
+    if (message.role !== 'assistant') {
+      return true;
+    }
+
+    const parts = Array.isArray(message.parts) ? message.parts : [];
+
+    return parts.every((part) => {
+      if (!part || typeof part !== 'object') {
+        return true;
+      }
+
+      const typed = part as { type?: string; state?: string };
+
+      if (typed.type === 'text' || typed.type === 'reasoning') {
+        return typed.state === undefined || typed.state === 'done';
+      }
+
+      if (typed.type === 'dynamic-tool') {
+        return typed.state !== 'input-streaming';
+      }
+
+      if (typeof typed.type === 'string' && typed.type.startsWith('tool-')) {
+        return typed.state !== 'input-streaming';
+      }
+
+      return true;
+    });
+  }, []);
+
+  const shouldPersistMessage = useCallback((message: { role: string }) => {
+    return message.role === 'user' || message.role === 'assistant';
+  }, []);
+
+  const persistMessages = useCallback(
+    async (candidates: Array<{ id: string; role: string; parts?: unknown; content?: unknown }>) => {
+      if (!activeSessionId) {
+        return;
+      }
+
+      const payload = candidates
+        .filter((candidate) => shouldPersistMessage(candidate))
+        .map((candidate) => ({
+          id: candidate.id,
+          role: candidate.role as 'user' | 'assistant',
+          content: extractTextFromMessage(candidate).trim(),
+        }))
+        .filter((item) => item.content.length > 0);
+
+      if (!payload.length) {
+        return;
+      }
+
+      try {
+        const response = await fetch(
+          `/api/projects/${projectId}/knowledge/chat/history/${activeSessionId}/messages`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ messages: payload }),
+          }
+        );
+
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          throw new Error(data?.error ?? '写入知识库对话消息失败');
+        }
+
+        payload.forEach((item) => {
+          persistedMessageIdsRef.current.add(item.id);
+        });
+
+        setSessions((prev) => {
+          if (!activeSessionId) return prev;
+
+          const nowIso = new Date().toISOString();
+          const updated = prev.map((session) =>
+            session.id === activeSessionId
+              ? { ...session, updatedAt: nowIso }
+              : session
+          );
+          const current = updated.find((session) => session.id === activeSessionId);
+          if (!current) {
+            return updated;
+          }
+          return [current, ...updated.filter((session) => session.id !== activeSessionId)];
+        });
+
+        void logger.info('知识库对话消息已持久化', 'knowledge-chat', {
+          projectId,
+          sessionId: activeSessionId,
+          messageIds: payload.map((item) => item.id),
+        });
+      } catch (error) {
+        console.error('写入知识库对话消息失败', error);
+        void logger.error('写入知识库对话消息失败', 'knowledge-chat', {
+          projectId,
+          sessionId: activeSessionId,
+          messageIds: payload.map((item) => item.id),
+        });
+      }
+    },
+    [activeSessionId, extractTextFromMessage, projectId, setSessions, shouldPersistMessage]
+  );
+
+  useEffect(() => {
+    if (!activeSessionId || messages.length === 0) {
+      return;
+    }
+
+    const readyMessages = messages.filter((message) => {
+      if (!shouldPersistMessage(message)) return false;
+      if (persistedMessageIdsRef.current.has(message.id)) return false;
+      if (!isMessageComplete(message)) return false;
+      return extractTextFromMessage(message).trim().length > 0;
+    });
+
+    if (readyMessages.length === 0) {
+      return;
+    }
+
+    void persistMessages(readyMessages);
+  }, [
+    messages,
+    activeSessionId,
+    extractTextFromMessage,
+    isMessageComplete,
+    persistMessages,
+    shouldPersistMessage,
+  ]);
+
+  useEffect(() => {
+    if (!activeSessionId) {
+      previousMessageIdsRef.current = messages.map((message) => message.id);
+      return;
+    }
+
+    const currentIds = messages.map((message) => message.id);
+    const previousIds = previousMessageIdsRef.current;
+    const newIds = currentIds.filter((id) => !previousIds.includes(id));
+
+    if (newIds.length > 0) {
+      const newMessages = messages.filter((message) => newIds.includes(message.id));
+
+      void logger.info('知识库对话消息更新', 'knowledge-chat', {
+        projectId,
+        sessionId: activeSessionId,
+        newMessageIds: newIds,
+        roles: newMessages.map((message) => message.role),
+      });
+    }
+
+    previousMessageIdsRef.current = currentIds;
+  }, [messages, activeSessionId, projectId]);
+
+  const handleStartNewSession = useCallback(
+    async (title?: string) => {
+      setCreatingSession(true);
+      try {
+        const response = await fetch(`/api/projects/${projectId}/knowledge/chat/history`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(title ? { title } : {}),
+        });
+
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(data?.error ?? '创建知识库对话会话失败');
+        }
+
+        const session = data?.session as KnowledgeChatSessionSummary | undefined;
+        if (!session) {
+          throw new Error('未返回有效的知识库对话会话');
+        }
+
+        setSessions((prev) => [session, ...prev.filter((item) => item.id !== session.id)]);
+        setActiveSessionId(session.id);
+        setMessages([]);
+        setChatInput('');
+        clearError();
+        persistedMessageIdsRef.current = new Set();
+        previousMessageIdsRef.current = [];
+
+        void logger.info('开始新的知识库对话会话', 'knowledge-chat', {
+          projectId,
+          sessionId: session.id,
+        });
+
+        return session;
+      } catch (error) {
+        console.error('创建知识库对话会话失败', error);
+        void logger.error('创建知识库对话会话失败', 'knowledge-chat', { projectId });
+        throw error;
+      } finally {
+        setCreatingSession(false);
+      }
+    },
+    [projectId, setMessages, clearError]
+  );
+
+  const ensureActiveSession = useCallback(async () => {
+    if (activeSessionId) {
+      return activeSessionId;
+    }
+
+    try {
+      const session = await handleStartNewSession();
+      return session?.id ?? null;
+    } catch {
+      return null;
+    }
+  }, [activeSessionId, handleStartNewSession]);
+
+  const loadSessionMessages = useCallback(
+    async (sessionId: string) => {
+      setLoadingHistory(true);
+      try {
+        const response = await fetch(
+          `/api/projects/${projectId}/knowledge/chat/history/${sessionId}/messages?limit=200`
+        );
+
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(data?.error ?? '加载知识库对话消息失败');
+        }
+
+        const history = (data?.messages as KnowledgeChatHistoryMessage[] | undefined) ?? [];
+        const restored = history.map((message) => ({
+          id: message.id,
+          role: message.role,
+          parts: [
+            {
+              type: 'text',
+              text: message.content,
+              state: 'done',
+            },
+          ],
+        }));
+
+        setMessages(restored);
+        persistedMessageIdsRef.current = new Set(restored.map((message) => message.id));
+        previousMessageIdsRef.current = restored.map((message) => message.id);
+
+        void logger.info('加载知识库对话历史', 'knowledge-chat', {
+          projectId,
+          sessionId,
+          messageCount: restored.length,
+        });
+      } catch (error) {
+        console.error('加载知识库对话消息失败', error);
+        void logger.error('加载知识库对话消息失败', 'knowledge-chat', {
+          projectId,
+          sessionId,
+        });
+      } finally {
+        setLoadingHistory(false);
+      }
+    },
+    [projectId, setMessages]
+  );
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadSessions = async () => {
+      setLoadingSessions(true);
+      try {
+        const response = await fetch(
+          `/api/projects/${projectId}/knowledge/chat/history`
+        );
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(data?.error ?? '加载知识库会话失败');
+        }
+
+        const sessionList = (data?.sessions as KnowledgeChatSessionSummary[] | undefined) ?? [];
+
+        if (!isMounted) {
+          return;
+        }
+
+        setSessions(sessionList);
+
+        const nextSessionId = sessionList.length
+          ? sessionList[0].id
+          : null;
+
+        if (sessionList.length === 0) {
+          await handleStartNewSession();
+        } else {
+          setActiveSessionId((current) => {
+            if (current && sessionList.some((session) => session.id === current)) {
+              return current;
+            }
+            return nextSessionId;
+          });
+        }
+      } catch (error) {
+        console.error('加载知识库会话失败', error);
+        void logger.error('加载知识库会话失败', 'knowledge-chat', { projectId });
+      } finally {
+        if (isMounted) {
+          setLoadingSessions(false);
+        }
+      }
+    };
+
+    void loadSessions();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [projectId, handleStartNewSession]);
+
+  useEffect(() => {
+    if (!activeSessionId) {
+      return;
+    }
+
+    void loadSessionMessages(activeSessionId);
+  }, [activeSessionId, loadSessionMessages]);
 
   const resetEditorState = () => {
     setEditingEntry(null);
@@ -222,40 +604,14 @@ export function KnowledgeBaseTab({ projectId }: KnowledgeBaseTabProps) {
   };
 
   const formattedMessages = useMemo(() => {
-    return messages.map((message) => {
-      const { parts, content } = message as {
-        parts?: Array<{ type?: string; text?: string }>;
-        content?: unknown;
-      };
-
-      let textContent =
-        parts
-          ?.map((part) => (part?.type === 'text' ? part.text ?? '' : ''))
-          .filter(Boolean)
-          .join('\n') ?? '';
-
-      if (!textContent) {
-        if (typeof content === 'string') {
-          textContent = content;
-        } else if (Array.isArray(content)) {
-          textContent = content
-            .map((item) =>
-              item && typeof item === 'object' && 'type' in item && item.type === 'text'
-                ? ((item as { text?: string }).text ?? '')
-                : ''
-            )
-            .filter(Boolean)
-            .join('\n');
-        }
-      }
-
-      return {
+    return messages
+      .filter((message) => shouldPersistMessage(message))
+      .map((message) => ({
         id: message.id,
         role: message.role,
-        content: textContent,
-      };
-    });
-  }, [messages]);
+        content: extractTextFromMessage(message),
+      }));
+  }, [messages, extractTextFromMessage, shouldPersistMessage]);
 
   const handleChatSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -263,25 +619,51 @@ export function KnowledgeBaseTab({ projectId }: KnowledgeBaseTabProps) {
     if (!trimmed) return;
 
     try {
-      await sendMessage({
-        role: 'user',
-        parts: [{ type: 'text', text: trimmed }],
-      });
+      const sessionId = await ensureActiveSession();
+      if (!sessionId) {
+        throw new Error('无法创建知识库对话会话');
+      }
+
+      await sendMessage(
+        {
+          role: 'user',
+          parts: [{ type: 'text', text: trimmed }],
+        },
+        { body: { sessionId } }
+      );
       setChatInput('');
       clearError();
     } catch (error) {
       console.error('发送聊天消息失败', error);
+      void logger.error('发送知识库聊天消息失败', 'knowledge-chat', {
+        projectId,
+        sessionId: activeSessionId,
+      });
     }
   };
 
   const handleClearConversation = () => {
-    setMessages([]);
     setChatInput('');
     clearError();
+    void handleStartNewSession();
   };
 
   const handleRegenerate = () => {
-    void regenerate();
+    void (async () => {
+      try {
+        const sessionId = await ensureActiveSession();
+        if (!sessionId) {
+          throw new Error('无法创建知识库对话会话');
+        }
+        await regenerate({ body: { sessionId } });
+      } catch (error) {
+        console.error('重新生成知识库回复失败', error);
+        void logger.error('重新生成知识库回复失败', 'knowledge-chat', {
+          projectId,
+          sessionId: activeSessionId,
+        });
+      }
+    })();
   };
 
   const handleStop = () => {
@@ -292,9 +674,7 @@ export function KnowledgeBaseTab({ projectId }: KnowledgeBaseTabProps) {
     <div className="grid gap-6 lg:grid-cols-[340px,1fr]">
       <Card className="flex min-h-[600px] flex-col lg:max-h-[calc(100vh-160px)] lg:overflow-hidden">
         <div className="flex items-center justify-between border-b px-5 py-4">
-          <div>
-            <h3 className="text-lg font-semibold">知识库片段</h3>
-          </div>
+
           <div className="flex items-center gap-2">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -437,21 +817,72 @@ export function KnowledgeBaseTab({ projectId }: KnowledgeBaseTabProps) {
       </Card>
 
       <Card className="flex min-h-[600px] flex-col lg:max-h-[calc(100vh-160px)] lg:overflow-hidden">
-        <div className="flex items-center justify-between border-b px-6 py-4">
+        <div className="flex flex-col gap-3 border-b px-6 py-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h3 className="text-lg font-semibold">知识库对话</h3>
             <p className="text-sm text-muted-foreground">
-              使用内置的 useChat 钩子实时检索并回答
+              {loadingSessions
+                ? '正在加载历史记录…'
+                : '对话记录会自动保存，可随时切换查看历史。'}
             </p>
           </div>
-          <Badge variant="secondary" className="gap-1">
-            <MessageCircle className="h-3.5 w-3.5" />
-            useChat
-          </Badge>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <Select
+              value={activeSessionId ?? undefined}
+              onValueChange={(value) => {
+                setActiveSessionId(value);
+                setMessages([]);
+                persistedMessageIdsRef.current = new Set();
+                previousMessageIdsRef.current = [];
+                clearError();
+              }}
+              disabled={loadingSessions || creatingSession || sessions.length === 0}
+            >
+              <SelectTrigger className="w-[220px]">
+                <SelectValue placeholder={loadingSessions ? '加载中…' : '选择历史对话'} />
+              </SelectTrigger>
+              <SelectContent>
+                {sessions.map((session) => {
+                  const timestamp = new Date(session.updatedAt);
+                  const timeLabel = Number.isNaN(timestamp.getTime())
+                    ? ''
+                    : timestamp.toLocaleString();
+                  return (
+                    <SelectItem key={session.id} value={session.id}>
+                      {session.title}
+                      {timeLabel ? ` · ${timeLabel}` : ''}
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void handleStartNewSession()}
+              disabled={creatingSession}
+            >
+              {creatingSession ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  创建中…
+                </>
+              ) : (
+                '新建对话'
+              )}
+            </Button>
+          </div>
         </div>
 
         <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
-          {formattedMessages.length === 0 && !isLoading && (
+          {loadingHistory && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              正在加载历史对话…
+            </div>
+          )}
+
+          {formattedMessages.length === 0 && !isLoading && !loadingHistory && (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-muted-foreground">
               <MessageCircle className="h-8 w-8" />
               <p className="text-sm">开始提问，系统会自动检索相关知识片段。</p>
@@ -527,7 +958,13 @@ export function KnowledgeBaseTab({ projectId }: KnowledgeBaseTabProps) {
           />
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <div className="flex items-center gap-2">
-              <Button type="button" variant="ghost" size="sm" onClick={handleClearConversation}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleClearConversation}
+                disabled={creatingSession}
+              >
                 清除对话
               </Button>
               {messages.length > 0 && (
@@ -535,14 +972,14 @@ export function KnowledgeBaseTab({ projectId }: KnowledgeBaseTabProps) {
                   type="button"
                   variant="ghost"
                   size="sm"
-                  disabled={isLoading}
+                  disabled={isLoading || creatingSession}
                   onClick={handleRegenerate}
                 >
                   重新生成
                 </Button>
               )}
             </div>
-            <Button type="submit" disabled={isLoading || !chatInput.trim()}>
+            <Button type="submit" disabled={isLoading || !chatInput.trim() || creatingSession}>
               {isLoading ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : (

@@ -29,6 +29,67 @@ import type {
   PlotRecord,
 } from '@/lib/types/plot';
 import { cn } from '@/lib/utils';
+import ReactFlow, {
+  Background,
+  Controls,
+  Edge,
+  Handle,
+  Node,
+  NodeProps,
+  Position,
+  ReactFlowProvider,
+} from 'reactflow';
+
+function composePlotContext(plot: PlotRecord | null | undefined): string {
+  if (!plot) {
+    return '当前无剧情节点。';
+  }
+
+  const { metadata, workflow } = plot;
+  const headerLines: string[] = [`当前剧情标题：${metadata.title}`];
+  if (metadata.genre) headerLines.push(`类型：${metadata.genre}`);
+  if (metadata.style) headerLines.push(`文风：${metadata.style}`);
+  if (metadata.pov) headerLines.push(`视角：${metadata.pov}`);
+  if (metadata.tags?.length) headerLines.push(`标签：${metadata.tags.join(', ')}`);
+
+  const nodes = workflow?.nodes ?? [];
+  const nodeLines = nodes.map((node, index) => {
+    const order = index + 1;
+    if (node.kind === 'dialogue') {
+      const action = node.action ? `（${node.action}）` : '';
+      return `${order}. 角色【${node.character ?? '未知角色'}】对话${action}：${node.text}`;
+    }
+    return `${order}. 旁白：${node.text}`;
+  });
+
+  return [
+    headerLines.join('\n'),
+    nodeLines.length ? ['已生成的剧情节点：', ...nodeLines].join('\n') : '当前无剧情节点。',
+    '请基于现有剧情继续输出下一段发展。',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function applyPromptPlaceholders(template: string, context: string): string {
+  if (!template) return template;
+  let result = template;
+  if (result.includes('%worldContext%')) {
+    result = result.replace(/%worldContext%/g, context);
+  }
+  if (result.includes('%input%')) {
+    result = result.replace(/%input%/g, '');
+  }
+  return result;
+}
+
+const WORD_BUDGET_MIN = 100;
+const WORD_BUDGET_MAX = 100000;
+
+function clampWordBudget(value: number): number {
+  if (Number.isNaN(value)) return WORD_BUDGET_MIN;
+  return Math.min(WORD_BUDGET_MAX, Math.max(WORD_BUDGET_MIN, Math.round(value)));
+}
 
 interface PromptOption {
   id: string;
@@ -61,22 +122,33 @@ export function PlotTab({ projectId }: PlotTabProps) {
   const [narrationText, setNarrationText] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [aiUsage, setAiUsage] = useState<{ tokens: number; cost: number } | null>(null);
-
-  useEffect(() => {
-    void loadPlots();
-    void loadPrompts();
-  }, [loadPlots, loadPrompts]);
+  const [wordBudget, setWordBudget] = useState<number>(800);
 
   const selectedPlot = useMemo(() => {
     if (!selectedPlotId) return plots[0] ?? null;
     return plots.find((plot) => plot.id === selectedPlotId) ?? plots[0] ?? null;
   }, [plots, selectedPlotId]);
 
+  const sanitizedWordBudget = useMemo(() => clampWordBudget(wordBudget), [wordBudget]);
+
   useEffect(() => {
     setTitleDraft(selectedPlot?.metadata.title ?? '');
   }, [selectedPlot]);
 
   const lastSegments = selectedPlot?.metadata.lastSegments ?? [];
+  const contextPreview = useMemo(() => composePlotContext(selectedPlot), [selectedPlot]);
+  const resolvePromptTemplate = useCallback(
+    (template: string) => applyPromptPlaceholders(template, contextPreview),
+    [contextPreview]
+  );
+
+  useEffect(() => {
+    setPromptText((current) =>
+      current && (current.includes('%worldContext%') || current.includes('%input%'))
+        ? resolvePromptTemplate(current)
+        : current
+    );
+  }, [resolvePromptTemplate]);
 
   const loadPlots = useCallback(async () => {
     try {
@@ -122,6 +194,11 @@ export function PlotTab({ projectId }: PlotTabProps) {
       console.error(error);
     }
   }, [projectId]);
+
+  useEffect(() => {
+    void loadPlots();
+    void loadPrompts();
+  }, [loadPlots, loadPrompts]);
 
   async function handleCreatePlot() {
     try {
@@ -216,10 +293,15 @@ export function PlotTab({ projectId }: PlotTabProps) {
     try {
       setGenerating(true);
       setErrorMessage(null);
+      const resolvedPrompt = resolvePromptTemplate(trimmed);
       const response = await fetch(`/api/plots/${selectedPlot.id}/ai`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: trimmed, promptId: selectedPromptId }),
+        body: JSON.stringify({
+          prompt: resolvedPrompt,
+          promptId: selectedPromptId,
+          wordBudget: sanitizedWordBudget,
+        }),
       });
       if (!response.ok) {
         const data = await response.json();
@@ -232,6 +314,7 @@ export function PlotTab({ projectId }: PlotTabProps) {
       if (!selectedPlotId) {
         setSelectedPlotId(updated.id);
       }
+      setPromptText(resolvedPrompt);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : '生成剧情失败');
     } finally {
@@ -389,6 +472,32 @@ export function PlotTab({ projectId }: PlotTabProps) {
 
         <div className="flex flex-col gap-4">
           <Card className="space-y-3 p-4">
+            <div className="space-y-2">
+              <Label htmlFor="plot-word-budget">目标字数</Label>
+              <div className="flex items-center gap-3">
+                <input
+                  id="plot-word-budget"
+                  type="range"
+                  min={WORD_BUDGET_MIN}
+                  max={WORD_BUDGET_MAX}
+                  step={100}
+                  value={sanitizedWordBudget}
+                  onChange={(event) => setWordBudget(clampWordBudget(Number(event.target.value)))}
+                  className="h-2 w-full flex-1 cursor-pointer appearance-none rounded bg-muted"
+                />
+                <Input
+                  type="number"
+                  min={WORD_BUDGET_MIN}
+                  max={WORD_BUDGET_MAX}
+                  value={sanitizedWordBudget}
+                  onChange={(event) => setWordBudget(clampWordBudget(Number(event.target.value)))}
+                  className="w-28"
+                />
+              </div>
+              <div className="rounded border border-dashed border-muted bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                发送时自动在提示词顶部添加：目标字数：{sanitizedWordBudget}
+              </div>
+            </div>
             <div>
               <Label className="text-xs text-muted-foreground">对话提示词列表</Label>
               <Select
@@ -397,7 +506,7 @@ export function PlotTab({ projectId }: PlotTabProps) {
                   setSelectedPromptId(value);
                   const prompt = promptList.find((item) => item.id === value);
                   if (prompt) {
-                    setPromptText(prompt.content ?? '');
+                    setPromptText(resolvePromptTemplate(prompt.content ?? ''));
                   }
                 }}
               >
@@ -515,6 +624,15 @@ interface FlowTimelineProps {
   nodes: PlotNode[];
 }
 
+interface PlotFlowNodeData {
+  plotNode: PlotNode;
+  order: number;
+}
+
+const FLOW_NODE_VERTICAL_GAP = 220;
+const FLOW_BRANCH_OFFSET_X = 280;
+const FLOW_CANVAS_MIN_HEIGHT = 640;
+
 function FlowTimeline({ nodes }: FlowTimelineProps) {
   if (!nodes.length) {
     return (
@@ -524,56 +642,142 @@ function FlowTimeline({ nodes }: FlowTimelineProps) {
     );
   }
 
+  const nodeTypes = useMemo(
+    () => ({
+      dialogue: CharacterMessageNode,
+      narration: NarrationNode,
+    }),
+    []
+  );
+
+  const flowNodes = useMemo<Node<PlotFlowNodeData>[]>(
+    () =>
+      nodes.map((plotNode, index) => ({
+        id: plotNode.id,
+        type: plotNode.kind,
+        position: {
+          x: plotNode.fromOptionId ? FLOW_BRANCH_OFFSET_X : 0,
+          y: index * FLOW_NODE_VERTICAL_GAP,
+        },
+        data: {
+          plotNode,
+          order: index + 1,
+        },
+        draggable: false,
+        selectable: false,
+      })),
+    [nodes]
+  );
+
+  const flowEdges = useMemo<Edge[]>(
+    () =>
+      nodes.reduce<Edge[]>((accumulator, plotNode, index) => {
+        if (index === 0) return accumulator;
+        const previous = nodes[index - 1];
+        const label = plotNode.fromOptionId ? `来自分支 ${plotNode.fromOptionId}` : undefined;
+        accumulator.push({
+          id: `${previous.id}-${plotNode.id}`,
+          source: previous.id,
+          target: plotNode.id,
+          type: 'smoothstep',
+          label,
+          labelBgPadding: [6, 2],
+          labelBgBorderRadius: 4,
+          labelStyle: { fontSize: 10 },
+        });
+        return accumulator;
+      }, []),
+    [nodes]
+  );
+
   return (
-    <div className="relative space-y-4">
-      <div className="absolute left-4 top-0 h-full w-px bg-border" aria-hidden />
-      {nodes.map((node, index) => (
-        <div key={node.id} className="relative flex gap-4">
-          <div className="relative flex h-10 w-10 items-center justify-center">
-            <span className="flex h-8 w-8 items-center justify-center rounded-full border bg-background text-xs font-semibold">
-              {index + 1}
+    <ReactFlowProvider>
+      <div className="h-full" style={{ minHeight: FLOW_CANVAS_MIN_HEIGHT }}>
+        <ReactFlow
+          nodes={flowNodes}
+          edges={flowEdges}
+          nodeTypes={nodeTypes}
+          fitView
+          fitViewOptions={{ padding: 0.3 }}
+          nodesDraggable={false}
+          nodesConnectable={false}
+          panOnScroll
+          zoomOnScroll
+          zoomOnPinch
+          selectNodesOnDrag={false}
+          className="[&_.react-flow__attribution]:hidden"
+        >
+          <Background gap={24} color="#E5E7EB" />
+          <Controls showInteractive={false} />
+        </ReactFlow>
+      </div>
+    </ReactFlowProvider>
+  );
+}
+
+function CharacterMessageNode({ data }: NodeProps<PlotFlowNodeData>) {
+  const { plotNode, order } = data;
+  return (
+    <div className="relative w-[360px]">
+      <Handle
+        type="target"
+        position={Position.Top}
+        className="!h-2 !w-2 !rounded-full !border-none !bg-primary/70"
+      />
+      <Card className="border border-primary/40 bg-primary/5 p-4 shadow-sm transition-shadow hover:shadow-md">
+        <div className="mb-2 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+              {order}
+            </span>
+            <span className="flex items-center gap-2 text-sm font-semibold text-primary">
+              <MessageCircle className="h-4 w-4" />
+              {plotNode.character || '未命名角色'}
             </span>
           </div>
-          <div className="flex-1">
-            <Card className="border border-border p-4">
-              <NodeContent node={node} />
-            </Card>
-          </div>
+          {plotNode.action ? <span className="text-xs text-muted-foreground">{plotNode.action}</span> : null}
         </div>
-      ))}
+        <p className="text-sm leading-relaxed text-foreground">{plotNode.text}</p>
+        {plotNode.fromOptionId ? (
+          <div className="mt-2 text-xs text-muted-foreground">来自分支 {plotNode.fromOptionId}</div>
+        ) : null}
+      </Card>
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className="!h-2 !w-2 !rounded-full !border-none !bg-primary/70"
+      />
     </div>
   );
 }
 
-function NodeContent({ node }: { node: PlotNode }) {
-  if (node.kind === 'dialogue') {
-    return (
-      <div className="space-y-1">
-        <div className="flex items-center justify-between text-sm font-semibold">
-          <span className="flex items-center gap-2">
-            <MessageCircle className="h-4 w-4" />
-            {node.character || '未命名角色'}
-          </span>
-          {node.action ? <span className="text-xs text-muted-foreground">{node.action}</span> : null}
-        </div>
-        <p className="text-sm leading-relaxed">{node.text}</p>
-        {node.fromOptionId ? (
-          <div className="text-xs text-muted-foreground">来自分支 {node.fromOptionId}</div>
-        ) : null}
-      </div>
-    );
-  }
-
+function NarrationNode({ data }: NodeProps<PlotFlowNodeData>) {
+  const { plotNode, order } = data;
   return (
-    <div className="space-y-1">
-      <div className="flex items-center gap-2 text-sm font-semibold">
-        <AlignLeft className="h-4 w-4" />
-        旁白
-      </div>
-      <p className="text-sm leading-relaxed">{node.text}</p>
-      {node.fromOptionId ? (
-        <div className="text-xs text-muted-foreground">来自分支 {node.fromOptionId}</div>
-      ) : null}
+    <div className="relative w-[320px]">
+      <Handle
+        type="target"
+        position={Position.Top}
+        className="!h-2 !w-2 !rounded-full !border-none !bg-muted-foreground/70"
+      />
+      <Card className="border border-muted bg-muted/20 p-4 shadow-sm transition-shadow hover:shadow-md">
+        <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-muted-foreground">
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-foreground">
+            {order}
+          </span>
+          <AlignLeft className="h-4 w-4" />
+          <span>旁白</span>
+        </div>
+        <p className="text-sm leading-relaxed text-muted-foreground">{plotNode.text}</p>
+        {plotNode.fromOptionId ? (
+          <div className="mt-2 text-xs text-muted-foreground/80">来自分支 {plotNode.fromOptionId}</div>
+        ) : null}
+      </Card>
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className="!h-2 !w-2 !rounded-full !border-none !bg-muted-foreground/70"
+      />
     </div>
   );
 }

@@ -494,8 +494,7 @@ As 资深小说世界观设计师, you must follow the above Rules, execute task
 
 ## Initialization
 As 多分支故事生成器, you must follow the above Rules, execute tasks according to Workflows, and output according to OutputFormat.`,
-    user: `世界观: %worldContext%
-    用户需求: %input%`,
+    user: ``,
   },
 
   portraitKeywords: {

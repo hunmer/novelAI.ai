@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
+import { embed } from 'ai';
 import { AIClient } from '@/lib/ai/client';
+import { getEmbeddingModel } from '@/lib/ai/dynamic-config';
+import { searchKnowledgeEntries } from '@/lib/actions/knowledge.actions';
 import {
   mergeMetadata,
   parsePlotMetadata,
@@ -24,7 +27,11 @@ type Params = { params: Promise<{ id: string }> };
 type GenerateBody = {
   prompt?: string;
   promptId?: string | null;
+  wordBudget?: number;
 };
+
+const WORD_BUDGET_MIN = 100;
+const WORD_BUDGET_MAX = 100000;
 
 function mapDialogToPlot(dialog: {
   id: string;
@@ -125,8 +132,7 @@ function applySegments(
     (segment): segment is FlowgramChoicesSegment => segment.type === 'choices'
   );
   const metaSegment = segments.find(
-    (segment): segment is Extract<FlowgramSegment, { type: 'meta' }>
-      => segment.type === 'meta'
+    (segment): segment is Extract<FlowgramSegment, { type: 'meta' }> => segment.type === 'meta'
   );
 
   const metadataPatch: Partial<PlotMetadata> = {
@@ -166,6 +172,12 @@ export async function POST(req: NextRequest, { params }: Params) {
       return NextResponse.json({ error: 'prompt is required' }, { status: 400 });
     }
 
+    const rawWordBudget = typeof body.wordBudget === 'number' ? body.wordBudget : 800;
+    const wordBudget = Math.min(
+      WORD_BUDGET_MAX,
+      Math.max(WORD_BUDGET_MIN, Math.round(rawWordBudget))
+    );
+
     const dialog = await prisma.dialog.findUnique({ where: { id } });
     if (!dialog) {
       return NextResponse.json({ error: '剧情不存在' }, { status: 404 });
@@ -174,9 +186,34 @@ export async function POST(req: NextRequest, { params }: Params) {
     const workflow = parsePlotWorkflow(dialog.content);
     const metadata = parsePlotMetadata(dialog.metadata);
 
-    const context = composeContext(metadata, workflow);
+    const embeddingInfo = await getEmbeddingModel();
+    const { embedding } = await embed({
+      model: embeddingInfo.model,
+      value: prompt,
+    });
 
-    const aiResult = await AIClient.generate('plotFlow', prompt, context, {
+    const embeddingVector = Array.from(embedding);
+
+    const relatedEntries = embeddingVector.length
+      ? await searchKnowledgeEntries(dialog.projectId, embeddingVector, 5)
+      : [];
+
+    const knowledgeContext = relatedEntries
+      .map((entry, index) =>
+        `知识库片段${index + 1} (相似度 ${entry.similarity.toFixed(3)}):\n${entry.content}`
+      )
+      .join('\n\n');
+
+    const contextBlocks: string[] = [];
+    if (knowledgeContext) {
+      contextBlocks.push(`知识库检索结果：\n${knowledgeContext}`);
+    }
+    contextBlocks.push(composeContext(metadata, workflow));
+    const context = contextBlocks.filter(Boolean).join('\n\n');
+
+    const promptWithBudget = `目标字数：${wordBudget}\n${prompt}`;
+
+    const aiResult = await AIClient.generate('plotFlow', promptWithBudget, context, {
       outputFormat: 'json',
     });
 
@@ -197,7 +234,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       metadata,
       workflow,
       segments,
-      prompt,
+      promptWithBudget,
       body.promptId
     );
 

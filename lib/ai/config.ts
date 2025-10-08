@@ -433,7 +433,7 @@ export const DEFAULT_MODEL = AI_MODELS.GPT4;
 
 export const AI_CONFIG = {
   maxRetries: 3,
-  timeout: 30000,
+  timeout: 1000 * 60 * 5,
   defaultTemperature: 0.8,
-  maxTokens: 4000,
+  maxTokens: 30000,
 } as const;

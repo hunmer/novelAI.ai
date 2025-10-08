@@ -1,13 +1,15 @@
 'use client';
 
 import Image from 'next/image';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import {
   ChatBubble,
   ChatBubbleAvatar,
   ChatBubbleMessage,
+  ChatBubbleAction,
+  ChatBubbleActionWrapper,
   ChatBubbleTimestamp,
 } from '@/components/ui/chat/chat-bubble';
 import { ChatInput } from '@/components/ui/chat/chat-input';
@@ -29,7 +31,7 @@ import {
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
-import { History, Loader2, MessageCircle, Plus } from 'lucide-react';
+import { Copy, History, Loader2, MessageCircle, Pencil, Plus, Trash2 } from 'lucide-react';
 
 interface CharacterSummary {
   id: string;
@@ -82,6 +84,8 @@ export function CharacterChatTab({ projectId }: CharacterChatTabProps) {
   const [sendingMessage, setSendingMessage] = useState(false);
   const [contextLimit, setContextLimit] = useState(20);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [activeMessageId, setActiveMessageId] = useState<string | null>(null);
+  const chatInputRef = useRef<HTMLTextAreaElement | null>(null);
 
   const selectedCharacter = useMemo(
     () => characters.find((item) => item.id === selectedCharacterId) ?? null,
@@ -301,6 +305,34 @@ export function CharacterChatTab({ projectId }: CharacterChatTabProps) {
     fetchSessions,
   ]);
 
+  const handleCopyMessage = useCallback(async (message: ChatMessage) => {
+    try {
+      await navigator.clipboard.writeText(message.content);
+    } catch (error) {
+      console.error('复制聊天消息失败:', error);
+    }
+  }, []);
+
+  const handleEditMessage = useCallback(
+    (message: ChatMessage) => {
+      setInputValue(message.content);
+      requestAnimationFrame(() => {
+        chatInputRef.current?.focus();
+      });
+    },
+    [],
+  );
+
+  const handleDeleteMessage = useCallback((message: ChatMessage) => {
+    setMessages((prev) => prev.filter((item) => item.id !== message.id));
+  }, []);
+
+  useEffect(() => {
+    if (activeMessageId && !messages.some((item) => item.id === activeMessageId)) {
+      setActiveMessageId(null);
+    }
+  }, [activeMessageId, messages]);
+
   const renderChatArea = () => {
     if (!selectedCharacter) {
       return (
@@ -381,7 +413,18 @@ export function CharacterChatTab({ projectId }: CharacterChatTabProps) {
             ) : messages.length ? (
               <ChatMessageList smooth className="h-full">
                 {messages.map((message) => (
-                  <ChatBubble key={message.id} variant={message.role === 'user' ? 'sent' : 'received'}>
+                  <ChatBubble
+                    key={message.id}
+                    variant={message.role === 'user' ? 'sent' : 'received'}
+                    onMouseEnter={() => setActiveMessageId(message.id)}
+                    onMouseLeave={() =>
+                      setActiveMessageId((current) => (current === message.id ? null : current))
+                    }
+                    onFocusCapture={() => setActiveMessageId(message.id)}
+                    onBlurCapture={() =>
+                      setActiveMessageId((current) => (current === message.id ? null : current))
+                    }
+                  >
                     <ChatBubbleAvatar
                       src={message.role === 'assistant' ? selectedCharacter.portraitThumbnail || selectedCharacter.portraitImage : undefined}
                       fallback={message.role === 'assistant' ? (selectedCharacter.name?.[0] ?? '角') : '我'}
@@ -392,6 +435,39 @@ export function CharacterChatTab({ projectId }: CharacterChatTabProps) {
                     >
                       {message.content}
                     </ChatBubbleMessage>
+                    {!message.pending && (
+                      <ChatBubbleActionWrapper
+                        data-visible={activeMessageId === message.id}
+                      >
+                        <ChatBubbleAction
+                          icon={<Copy className="h-4 w-4" />}
+                          aria-label="复制消息"
+                          onClick={() => handleCopyMessage(message)}
+                          onFocus={() => setActiveMessageId(message.id)}
+                          onBlur={() =>
+                            setActiveMessageId((current) => (current === message.id ? null : current))
+                          }
+                        />
+                        <ChatBubbleAction
+                          icon={<Pencil className="h-4 w-4" />}
+                          aria-label="编辑消息"
+                          onClick={() => handleEditMessage(message)}
+                          onFocus={() => setActiveMessageId(message.id)}
+                          onBlur={() =>
+                            setActiveMessageId((current) => (current === message.id ? null : current))
+                          }
+                        />
+                        <ChatBubbleAction
+                          icon={<Trash2 className="h-4 w-4" />}
+                          aria-label="删除消息"
+                          onClick={() => handleDeleteMessage(message)}
+                          onFocus={() => setActiveMessageId(message.id)}
+                          onBlur={() =>
+                            setActiveMessageId((current) => (current === message.id ? null : current))
+                          }
+                        />
+                      </ChatBubbleActionWrapper>
+                    )}
                     {!message.pending && (
                       <ChatBubbleTimestamp timestamp={formatTime(message.createdAt)} />
                     )}
@@ -420,6 +496,7 @@ export function CharacterChatTab({ projectId }: CharacterChatTabProps) {
                 <ChatInput
                   value={inputValue}
                   onChange={(event) => setInputValue(event.target.value)}
+                  ref={chatInputRef}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' && !event.shiftKey) {
                       event.preventDefault();

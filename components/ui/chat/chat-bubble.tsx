@@ -6,7 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import MessageLoading from './message-loading';
 import { Button, type ButtonProps } from '@/components/ui/button';
 
-const chatBubbleVariant = cva('flex gap-2 max-w-[60%] items-end relative group', {
+const chatBubbleVariant = cva('flex gap-3 max-w-[65%] items-center relative group', {
   variants: {
     variant: {
       received: 'self-start',
@@ -53,18 +53,18 @@ interface ChatBubbleAvatarProps {
 
 export function ChatBubbleAvatar({ src, fallback, className }: ChatBubbleAvatarProps) {
   return (
-    <Avatar className={className}>
+    <Avatar className={cn('h-10 w-10 shrink-0 border border-border bg-background', className)}>
       {src ? <AvatarImage src={src} alt="Avatar" /> : null}
       <AvatarFallback>{fallback}</AvatarFallback>
     </Avatar>
   );
 }
 
-const chatBubbleMessageVariants = cva('p-4', {
+const chatBubbleMessageVariants = cva('px-4 py-3 rounded-2xl shadow-sm border transition-colors', {
   variants: {
     variant: {
-      received: 'bg-secondary text-secondary-foreground rounded-r-lg rounded-tl-lg',
-      sent: 'bg-primary text-primary-foreground rounded-l-lg rounded-tr-lg',
+      received: 'bg-muted text-foreground border-border',
+      sent: 'bg-primary text-primary-foreground border-primary',
     },
     layout: {
       default: '',
@@ -111,7 +111,7 @@ interface ChatBubbleTimestampProps extends HTMLAttributes<HTMLDivElement> {
 
 export function ChatBubbleTimestamp({ timestamp, className, ...props }: ChatBubbleTimestampProps) {
   return (
-    <div className={cn('text-xs mt-2 text-right text-muted-foreground', className)} {...props}>
+    <div className={cn('mt-2 text-xs text-right text-muted-foreground', className)} {...props}>
       {timestamp}
     </div>
   );
@@ -136,22 +136,16 @@ export function ChatBubbleAction({
   );
 }
 
-interface ChatBubbleActionWrapperProps extends HTMLAttributes<HTMLDivElement> {
-  variant?: 'sent' | 'received';
-  className?: string;
-}
+type ChatBubbleActionWrapperProps = HTMLAttributes<HTMLDivElement>;
 
 export const ChatBubbleActionWrapper = forwardRef<
   HTMLDivElement,
   ChatBubbleActionWrapperProps
->(({ variant, className, children, ...props }, ref) => (
+>(({ className, children, ...props }, ref) => (
   <div
     ref={ref}
     className={cn(
-      'absolute top-1/2 -translate-y-1/2 flex opacity-0 group-hover:opacity-100 transition-opacity duration-200',
-      variant === 'sent'
-        ? '-left-1 -translate-x-full flex-row-reverse'
-        : '-right-1 translate-x-full',
+      'absolute left-1/2 top-full z-10 flex -translate-x-1/2 translate-y-2 gap-1 opacity-0 pointer-events-none transition-all duration-200 data-[visible=true]:pointer-events-auto data-[visible=true]:opacity-100',
       className,
     )}
     {...props}

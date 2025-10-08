@@ -13,16 +13,49 @@ export function FloatingLoggerButton({ onClick }: FloatingLoggerButtonProps) {
   const [position, setPosition] = React.useState({ x: 0, y: 0 });
   const buttonRef = React.useRef<HTMLButtonElement>(null);
   const dragStart = React.useRef({ x: 0, y: 0 });
+  const hasMoved = React.useRef(false);
+  const latestPosition = React.useRef(position);
+  const storageKey = React.useRef('loggerWidgetPosition');
 
-  React.useEffect(() => {
-    // 初始位置设置在右侧中间
+  const clampPosition = React.useCallback((x: number, y: number) => {
+    const maxX = Math.max(0, window.innerWidth - 56);
+    const maxY = Math.max(0, window.innerHeight - 56);
+
+    return {
+      x: Math.max(0, Math.min(x, maxX)),
+      y: Math.max(0, Math.min(y, maxY)),
+    };
+  }, []);
+
+  React.useLayoutEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const saved = window.localStorage.getItem(storageKey.current);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved) as { x: number; y: number };
+        const { x, y } = clampPosition(parsed.x, parsed.y);
+        setPosition({ x, y });
+        return;
+      } catch (error) {
+        console.warn('Failed to restore logger widget position', error);
+      }
+    }
+
     const initialY = window.innerHeight / 2 - 28;
     const initialX = window.innerWidth - 80;
-    setPosition({ x: initialX, y: initialY });
-  }, []);
+    setPosition(clampPosition(initialX, initialY));
+  }, [clampPosition]);
+
+  React.useEffect(() => {
+    latestPosition.current = position;
+  }, [position]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     setIsDragging(true);
+    hasMoved.current = false;
     dragStart.current = {
       x: e.clientX - position.x,
       y: e.clientY - position.y,
@@ -36,20 +69,20 @@ export function FloatingLoggerButton({ onClick }: FloatingLoggerButtonProps) {
       const newX = e.clientX - dragStart.current.x;
       const newY = e.clientY - dragStart.current.y;
 
-      // 限制在窗口范围内
-      const maxX = window.innerWidth - 56;
-      const maxY = window.innerHeight - 56;
-
-      setPosition({
-        x: Math.max(0, Math.min(newX, maxX)),
-        y: Math.max(0, Math.min(newY, maxY)),
-      });
+      hasMoved.current = true;
+      setPosition(clampPosition(newX, newY));
     },
-    [isDragging]
+    [clampPosition, isDragging]
   );
 
   const handleMouseUp = React.useCallback(() => {
     setIsDragging(false);
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const { x, y } = latestPosition.current;
+    window.localStorage.setItem(storageKey.current, JSON.stringify({ x, y }));
   }, []);
 
   React.useEffect(() => {
@@ -69,7 +102,7 @@ export function FloatingLoggerButton({ onClick }: FloatingLoggerButtonProps) {
       ref={buttonRef}
       onClick={(e) => {
         // 只有在没有拖动时才触发点击
-        if (!isDragging) {
+        if (!isDragging && !hasMoved.current) {
           onClick();
         }
       }}

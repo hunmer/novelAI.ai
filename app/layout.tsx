@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import 'reactflow/dist/style.css';
 import { LoggerWidget } from '@/components/logger/logger-widget';
 
 export const metadata: Metadata = {
