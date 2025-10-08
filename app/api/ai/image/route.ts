@@ -35,6 +35,7 @@ const customFetch = proxyUrl
   : undefined;
 
 const prisma = new PrismaClient();
+const METACHAT_DEFAULT_BASE_URL = 'https://api.mmchat.xyz/open/v1';
 
 export async function POST(req: NextRequest) {
   try {
@@ -258,6 +259,22 @@ async function generateImageFromProvider({
       return generateWithGoogle({ provider, modelConfig, prompt, size, modelMetadata });
     case 'google-vertex':
       return generateWithVertex({ provider, modelConfig, prompt, size, modelMetadata });
+    case 'metachat-mj':
+      return generateWithMetaChatMidjourney({
+        provider,
+        modelConfig,
+        prompt,
+        size,
+        modelMetadata,
+      });
+    case 'metachat-flux':
+      return generateWithMetaChatFlux({
+        provider,
+        modelConfig,
+        prompt,
+        size,
+        modelMetadata,
+      });
     default:
       throw new Error(`当前图片生成暂不支持提供商类型: ${provider.type}`);
   }
@@ -423,6 +440,427 @@ async function generateWithGoogle({
   };
 }
 
+async function generateWithMetaChatMidjourney(args: ImageGenerationArgs): Promise<ImageGenerationResult> {
+  return generateWithMetaChatBase(args, {
+    providerLabel: 'MetaChat Midjourney',
+    creationPath: 'midjourney/imagine',
+    resultPath: (taskId) => `midjourney/result/${taskId}`,
+    metadataProvider: 'metachat-mj',
+    extractImageUrl: (data) => {
+      const direct = typeof data['image_url'] === 'string' && (data['image_url'] as string).trim()
+        ? (data['image_url'] as string)
+        : undefined;
+      if (direct) return direct;
+      const imageUrls = Array.isArray(data['image_urls']) ? (data['image_urls'] as unknown[]) : [];
+      const candidate = imageUrls.find((item) => typeof item === 'string' && item.trim()) as string | undefined;
+      if (typeof candidate === 'string') return candidate;
+      return undefined;
+    },
+  });
+}
+
+async function generateWithMetaChatFlux(args: ImageGenerationArgs): Promise<ImageGenerationResult> {
+  return generateWithMetaChatBase(args, {
+    providerLabel: 'MetaChat Flux',
+    creationPath: 'flux/generate',
+    resultPath: (taskId) => `flux/result/${taskId}`,
+    metadataProvider: 'metachat-flux',
+    extractImageUrl: (data) => {
+      const imageUrls = Array.isArray(data['image_urls']) ? (data['image_urls'] as unknown[]) : [];
+      const candidate = imageUrls.find((item) => typeof item === 'string' && item.trim()) as string | undefined;
+      if (typeof candidate === 'string') return candidate;
+      return undefined;
+    },
+  });
+}
+
+type MetaChatProfile = {
+  providerLabel: string;
+  creationPath: string;
+  resultPath: (taskId: string) => string;
+  metadataProvider: string;
+  extractImageUrl: (data: Record<string, unknown>) => string | undefined;
+};
+
+type MetaChatCreationData = {
+  id: string;
+  prompt?: string;
+  model?: string;
+  mode?: string;
+  [key: string]: unknown;
+};
+
+async function generateWithMetaChatBase(
+  { provider, modelConfig, prompt, size, modelMetadata }: ImageGenerationArgs,
+  profile: MetaChatProfile
+): Promise<ImageGenerationResult> {
+  // 统一处理 MetaChat 任务的创建、轮询和结果下载，避免 MJ 与 FLUX 逻辑重复。
+  const metaConfig = resolveMetaChatConfig(provider, modelMetadata, profile.providerLabel);
+  const aspectRatio = toAspectRatio(size);
+  const params = buildMetaChatParams(modelMetadata, provider.metadata, aspectRatio);
+
+  const payload: Record<string, unknown> = {
+    prompt,
+    model:
+      typeof modelMetadata.model === 'string' && modelMetadata.model.trim()
+        ? (modelMetadata.model as string)
+        : modelConfig.name,
+  };
+
+  if (params) {
+    payload.params = params;
+  }
+
+  const referenceImages = buildMetaChatImages(modelMetadata);
+  if (referenceImages.length) {
+    payload.images = referenceImages;
+  }
+
+  await logger.info(`${profile.providerLabel} 创建任务`, 'ai-image', {
+    providerId: provider.id,
+    model: payload.model,
+    params,
+    hasReferenceImages: referenceImages.length > 0,
+  });
+
+  const creation = await metaChatJsonRequest<MetaChatCreationData>(metaConfig, profile.creationPath, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+  if (creation.envelope.status !== 'Success' || !creation.envelope.data) {
+    throw new Error(creation.envelope.message || `${profile.providerLabel} 任务创建失败`);
+  }
+
+  const taskId = creation.envelope.data.id;
+  const encodedTaskId = encodeURIComponent(taskId);
+  const result = await pollMetaChatTask(metaConfig, profile.resultPath(encodedTaskId), {
+    providerLabel: profile.providerLabel,
+  });
+
+  const taskData = result.envelope.data;
+  if (!taskData || typeof taskData !== 'object') {
+    throw new Error(`${profile.providerLabel} 返回数据为空`);
+  }
+
+  const normalizedTask = taskData as Record<string, unknown>;
+  const taskStatus = typeof normalizedTask.status === 'string' ? normalizedTask.status.toLowerCase() : '';
+
+  if (taskStatus !== 'success') {
+    throw new Error(`${profile.providerLabel} 任务未成功结束，当前状态: ${normalizedTask.status}`);
+  }
+
+  const imageUrl = profile.extractImageUrl(normalizedTask);
+  if (!imageUrl) {
+    throw new Error(`${profile.providerLabel} 任务未返回图片 URL`);
+  }
+
+  const asset = await downloadMetaChatAsset(metaConfig, imageUrl);
+  const metadata = sanitizeMetadataRecord({
+    task: taskData,
+    response: creation.envelope,
+    provider: profile.metadataProvider,
+  });
+
+  return {
+    buffer: asset.buffer,
+    contentType: asset.contentType,
+    extension: resolveImageExtension(asset.contentType),
+    metadata,
+  };
+}
+
+type MetaChatEnvelope<T> = {
+  status?: string;
+  message?: string;
+  data?: T;
+};
+
+type MetaChatConfig = {
+  baseUrl: string;
+  headers: Record<string, string>;
+  query: Record<string, string>;
+  pollIntervalMs: number;
+  maxAttempts: number;
+  fetchImpl: typeof fetch;
+};
+
+function resolveMetaChatConfig(
+  provider: ModelProviderConfig,
+  modelMetadata: Record<string, unknown>,
+  providerLabel: string
+): MetaChatConfig {
+  const providerMetadata = (provider.metadata || {}) as Record<string, unknown>;
+  const apiKey = provider.apiKey || getMetadataString(providerMetadata, 'apiKey', 'token');
+  if (!apiKey) {
+    throw new Error(`${providerLabel} 提供商缺少 API Key`);
+  }
+
+  const appId =
+    getMetadataString(modelMetadata, 'appId', 'appID', 'appid', 'app-id') ??
+    getMetadataString(providerMetadata, 'appId', 'appID', 'appid', 'app-id');
+  if (!appId) {
+    throw new Error(`${providerLabel} 提供商缺少 App ID`);
+  }
+
+  const baseUrl = normalizeBaseUrl(
+    getMetadataString(modelMetadata, 'baseURL', 'baseUrl', 'endpoint') ??
+      getMetadataString(providerMetadata, 'baseURL', 'baseUrl', 'endpoint') ??
+      provider.baseUrl ??
+      METACHAT_DEFAULT_BASE_URL
+  );
+
+  const providerHeaders = toStringRecord(
+    sanitizeMetadataRecord(getMetadataObject(providerMetadata, 'headers', 'customHeaders'))
+  );
+  const modelHeaders = toStringRecord(
+    sanitizeMetadataRecord(getMetadataObject(modelMetadata, 'headers', 'customHeaders'))
+  );
+
+  const headers: Record<string, string> = {
+    ...providerHeaders,
+    ...modelHeaders,
+  };
+  headers['Content-Type'] = headers['Content-Type'] ?? 'application/json';
+  headers.Authorization = `Bearer ${apiKey}`;
+  headers['X-App-ID'] = appId;
+
+  const providerQuery = toStringRecord(
+    sanitizeMetadataRecord(getMetadataObject(providerMetadata, 'query', 'queryParams'))
+  );
+  const modelQuery = toStringRecord(
+    sanitizeMetadataRecord(getMetadataObject(modelMetadata, 'query', 'queryParams'))
+  );
+
+  const pollIntervalMs =
+    toPositiveInteger(
+      getMetadataNumber(modelMetadata, 'pollIntervalMs', 'pollInterval') ??
+        getMetadataNumber(providerMetadata, 'pollIntervalMs', 'pollInterval')
+    ) ?? 5_000;
+
+  const maxAttempts =
+    toPositiveInteger(
+      getMetadataNumber(modelMetadata, 'pollMaxAttempts', 'pollAttempts', 'maxPollAttempts') ??
+        getMetadataNumber(providerMetadata, 'pollMaxAttempts', 'pollAttempts', 'maxPollAttempts')
+    ) ?? 60;
+
+  return {
+    baseUrl,
+    headers,
+    query: { ...providerQuery, ...modelQuery },
+    pollIntervalMs,
+    maxAttempts,
+    fetchImpl: customFetch ?? fetch,
+  };
+}
+
+async function metaChatJsonRequest<T>(
+  config: MetaChatConfig,
+  path: string,
+  init: RequestInit
+): Promise<{ envelope: MetaChatEnvelope<T> }> {
+  const url = buildMetaChatUrl(config.baseUrl, path, config.query);
+  const response = await config.fetchImpl(url.toString(), {
+    headers: config.headers,
+    ...init,
+  });
+  const raw = await response.text();
+
+  if (!response.ok) {
+    throw new Error(
+      `MetaChat 请求失败 (${response.status}): ${raw || response.statusText}`
+    );
+  }
+
+  let envelope: MetaChatEnvelope<T>;
+  try {
+    envelope = raw ? (JSON.parse(raw) as MetaChatEnvelope<T>) : {};
+  } catch (error) {
+    throw new Error(`MetaChat 响应解析失败: ${(error as Error).message}`);
+  }
+
+  return { envelope };
+}
+
+async function pollMetaChatTask<T extends { status?: string }>(
+  config: MetaChatConfig,
+  path: string,
+  options: { providerLabel: string }
+): Promise<{ envelope: MetaChatEnvelope<T> }> {
+  let attempt = 0;
+  let lastStatus: string | undefined;
+
+  while (attempt < config.maxAttempts) {
+    attempt += 1;
+    const result = await metaChatJsonRequest<T>(config, path, { method: 'GET' });
+    const envelope = result.envelope;
+
+    if (envelope.status !== 'Success') {
+      throw new Error(envelope.message || `${options.providerLabel} 返回失败`);
+    }
+
+    const data = envelope.data;
+    if (!data) {
+      throw new Error(`${options.providerLabel} 返回数据为空`);
+    }
+
+    const status = typeof data.status === 'string' ? data.status.toLowerCase() : '';
+    if (status && status !== lastStatus) {
+      lastStatus = status;
+      await logger.debug(`${options.providerLabel} 任务状态更新`, 'ai-image', {
+        status,
+        attempt,
+        taskId: (data as any).id,
+      });
+    }
+
+    if (status === 'success') {
+      return result;
+    }
+    if (status === 'failure') {
+      const reason = (data as Record<string, unknown>).fail_reason;
+      throw new Error(
+        typeof reason === 'string' && reason.trim()
+          ? reason
+          : `${options.providerLabel} 任务执行失败`
+      );
+    }
+
+    await sleep(config.pollIntervalMs);
+  }
+
+  throw new Error(`${options.providerLabel} 任务轮询超时`);
+}
+
+function buildMetaChatParams(
+  modelMetadata: Record<string, unknown>,
+  providerMetadata: Record<string, unknown> | undefined,
+  aspectRatio?: string
+): Record<string, unknown> | undefined {
+  const providerParams = sanitizeMetadataRecord(
+    getMetadataObject(providerMetadata, 'params', 'defaultParams')
+  );
+  const modelParams = sanitizeMetadataRecord(
+    getMetadataObject(modelMetadata, 'params', 'defaultParams')
+  );
+
+  const merged: Record<string, unknown> = {
+    ...(providerParams || {}),
+    ...(modelParams || {}),
+  };
+
+  if (aspectRatio && !merged.aspect) {
+    merged.aspect = aspectRatio;
+  }
+
+  const cleanedEntries = Object.entries(merged).filter(([, value]) => value !== undefined && value !== null);
+  return cleanedEntries.length ? Object.fromEntries(cleanedEntries) : undefined;
+}
+
+function buildMetaChatImages(modelMetadata: Record<string, unknown>): Array<Record<string, unknown>> {
+  const source = modelMetadata.images ?? modelMetadata.referenceImages;
+  let normalized: unknown;
+
+  if (typeof source === 'string' && source.trim()) {
+    try {
+      normalized = JSON.parse(source.trim());
+    } catch {
+      normalized = undefined;
+    }
+  } else {
+    normalized = source;
+  }
+
+  if (!Array.isArray(normalized)) {
+    return [];
+  }
+
+  return normalized
+    .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object' && !Array.isArray(item))
+    .map((item) => sanitizeMetadataRecord(item as Record<string, unknown>))
+    .filter((item): item is Record<string, unknown> => !!item);
+}
+
+async function downloadMetaChatAsset(config: MetaChatConfig, url: string) {
+  const response = await config.fetchImpl(url);
+  if (!response.ok) {
+    throw new Error(`下载图片失败: ${response.status} ${response.statusText}`);
+  }
+  const contentType = response.headers.get('content-type') ?? guessContentTypeFromUrl(url);
+  const arrayBuffer = await response.arrayBuffer();
+  return { buffer: Buffer.from(arrayBuffer), contentType };
+}
+
+function buildMetaChatUrl(
+  baseUrl: string,
+  path: string,
+  query: Record<string, string>
+): URL {
+  const normalizedPath = path.startsWith('/') ? path.slice(1) : path;
+  const url = new URL(normalizedPath, `${baseUrl}/`);
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== null && value !== '') {
+      url.searchParams.set(key, value);
+    }
+  }
+  return url;
+}
+
+function toStringRecord(record?: Record<string, unknown> | null): Record<string, string> {
+  if (!record) return {};
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(record)) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === 'string') {
+      if (value.trim()) result[key] = value;
+      continue;
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      result[key] = String(value);
+    }
+  }
+  return result;
+}
+
+function normalizeBaseUrl(baseUrl: string): string {
+  return baseUrl.replace(/\/+$/, '');
+}
+
+function toPositiveInteger(value?: number): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Number.isFinite(value)) return undefined;
+  const rounded = Math.floor(value);
+  return rounded > 0 ? rounded : undefined;
+}
+
+function guessContentTypeFromUrl(url: string): string | undefined {
+  try {
+    const parsed = new URL(url);
+    const segments = parsed.pathname.split('/');
+    const lastSegment = segments[segments.length - 1];
+    const idx = lastSegment.lastIndexOf('.');
+    if (idx === -1) return undefined;
+    const ext = lastSegment.substring(idx + 1).toLowerCase();
+    switch (ext) {
+      case 'png':
+        return 'image/png';
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+      case 'webp':
+        return 'image/webp';
+      case 'gif':
+        return 'image/gif';
+      case 'bmp':
+        return 'image/bmp';
+      default:
+        return undefined;
+    }
+  } catch {
+    return undefined;
+  }
+}
+
 async function generateWithVertex({
   provider,
   modelConfig,
@@ -530,6 +968,26 @@ function getMetadataString(
   return undefined;
 }
 
+function getMetadataNumber(
+  source: Record<string, unknown> | undefined,
+  ...keys: string[]
+): number | undefined {
+  if (!source) return undefined;
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Number(value.trim());
+      if (!Number.isNaN(parsed)) {
+        return parsed;
+      }
+    }
+  }
+  return undefined;
+}
+
 function getMetadataObject(
   source: Record<string, unknown> | undefined,
   ...keys: string[]
@@ -626,4 +1084,8 @@ function buildVertexInit(provider: ModelProviderConfig): Record<string, unknown>
   }
 
   return init;
+}
+
+function sleep(durationMs: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, durationMs));
 }

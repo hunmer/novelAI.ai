@@ -274,6 +274,8 @@ export function CharacterEditor({ projectId, worldContext }: CharacterEditorProp
                   projectId={projectId}
                   characterId={selected.id}
                   initialPrompt={selected.paintingPrompt || ''}
+                  inputContext={selected.attributes || ''}
+                  worldContext={worldContext}
                   onImageGenerated={handleImageGenerated}
                   highlightImageUrl={selected.portraitImage}
                   highlightThumbnailUrl={selected.portraitThumbnail}

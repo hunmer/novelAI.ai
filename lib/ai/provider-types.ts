@@ -14,6 +14,8 @@ export const PROVIDER_TYPE_OPTIONS = [
   { value: 'fireworks', label: 'Fireworks' },
   { value: 'baseten', label: 'Baseten' },
   { value: 'custom', label: '自定义 (OpenAI 兼容)' },
+  { value: 'metachat-mj', label: 'MetaChat Midjourney' },
+  { value: 'metachat-flux', label: 'MetaChat Flux' },
 ] as const;
 
 export type ProviderType = (typeof PROVIDER_TYPE_OPTIONS)[number]['value'];

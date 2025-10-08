@@ -306,6 +306,8 @@ export function SceneEditor({ projectId, worldContext }: SceneEditorProps) {
                   projectId={projectId}
                   sceneId={selected.id}
                   initialPrompt={selected.paintingPrompt || ''}
+                  inputContext={selected.description || ''}
+                  worldContext={worldContext}
                   onImageGenerated={handleImageGenerated}
                   highlightImageUrl={selected.backgroundImage}
                   highlightThumbnailUrl={selected.backgroundThumbnail}

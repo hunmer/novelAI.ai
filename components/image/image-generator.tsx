@@ -69,6 +69,8 @@ interface ImageGeneratorProps {
   sceneId?: string;
   characterId?: string;
   initialPrompt?: string;
+  inputContext?: string;
+  worldContext?: string;
   onImageGenerated?: (
     imageUrl: string,
     imageId: string,
@@ -84,6 +86,8 @@ export function ImageGenerator({
   sceneId,
   characterId,
   initialPrompt = '',
+  inputContext,
+  worldContext,
   onImageGenerated,
   highlightImageUrl,
   highlightThumbnailUrl,
@@ -105,9 +109,24 @@ export function ImageGenerator({
   );
   const hasAutoFilledPortrait = useRef(false);
 
+  const resolveTemplatePlaceholders = useCallback(
+    (template: string) => {
+      if (!template) return template;
+      let result = template;
+      if (result.includes('%input%')) {
+        result = result.replace(/%input%/g, (inputContext ?? '').trim());
+      }
+      if (result.includes('%worldContext%')) {
+        result = result.replace(/%worldContext%/g, (worldContext ?? '').trim());
+      }
+      return result;
+    },
+    [inputContext, worldContext]
+  );
+
   useEffect(() => {
-    setPrompt(initialPrompt);
-  }, [initialPrompt]);
+    setPrompt(resolveTemplatePlaceholders(initialPrompt));
+  }, [initialPrompt, resolveTemplatePlaceholders]);
 
   useEffect(() => {
     const fetchPortraitPresets = async () => {
@@ -163,10 +182,10 @@ export function ImageGenerator({
       ? defaultPreset.user
       : defaultPreset.content ?? '';
     if (nextPrompt) {
-      setPrompt(nextPrompt);
+      setPrompt(resolveTemplatePlaceholders(nextPrompt));
     }
     hasAutoFilledPortrait.current = true;
-  }, [portraitPresets, prompt]);
+  }, [portraitPresets, prompt, resolveTemplatePlaceholders]);
 
   // 加载图片生成模型提供商
   useEffect(() => {
@@ -374,26 +393,29 @@ export function ImageGenerator({
       const nextPrompt = preset.user && preset.user.trim()
         ? preset.user
         : preset.content ?? '';
-      setPrompt(nextPrompt);
+      setPrompt(resolveTemplatePlaceholders(nextPrompt));
     },
-    [portraitPresets]
+    [portraitPresets, resolveTemplatePlaceholders]
   );
 
   const handleGenerate = async () => {
-    const trimmedPrompt = prompt.trim();
-    if (!trimmedPrompt || !selectedProviderId) return;
+    const resolvedPrompt = resolveTemplatePlaceholders(prompt).trim();
+    if (!resolvedPrompt || !selectedProviderId) return;
 
     setIsGenerating(true);
     setGeneratedImageUrl('');
 
     try {
-      let imagePrompt = trimmedPrompt;
+      let imagePrompt = resolvedPrompt;
 
       if (portraitPresets.length && selectedPortraitPresetId !== PORTRAIT_PRESET_CUSTOM) {
         const keywordResponse = await fetch('/api/ai/portrait-keywords', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: trimmedPrompt }),
+          body: JSON.stringify({
+            prompt: resolvedPrompt,
+            worldContext,
+          }),
         });
 
         const keywordData = await keywordResponse.json();
