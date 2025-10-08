@@ -138,6 +138,42 @@ function normalizePrivateKey(value?: string) {
   return value ? value.replace(/\\n/g, '\n') : undefined;
 }
 
+function extractHeadersFromMetadata(
+  metadata?: Record<string, unknown>
+): Record<string, string> {
+  if (!metadata) return {};
+  const record = getMetadataObject(metadata, 'headers', 'customHeaders');
+  if (!record) return {};
+
+  const headers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(record)) {
+    const trimmedKey = key.trim();
+    if (!trimmedKey) continue;
+    let stringValue: string | undefined;
+    if (typeof value === 'string') {
+      stringValue = value.trim();
+    } else if (typeof value === 'number' || typeof value === 'boolean') {
+      stringValue = String(value);
+    }
+    if (!stringValue) continue;
+    headers[trimmedKey] = stringValue;
+  }
+  return headers;
+}
+
+export function resolveRequestHeaders(
+  provider: ModelProviderConfig,
+  model?: ProviderModelConfig
+): Record<string, string> {
+  const providerHeaders = extractHeadersFromMetadata(
+    (provider.metadata || undefined) as Record<string, unknown> | undefined
+  );
+  const modelHeaders = extractHeadersFromMetadata(
+    (model?.metadata || undefined) as Record<string, unknown> | undefined
+  );
+  return { ...providerHeaders, ...modelHeaders };
+}
+
 function buildSimpleProvider<T extends (options?: any) => any>(
   factory: T,
   provider: ModelProviderConfig,
@@ -573,10 +609,10 @@ export async function getDefaultModel(): Promise<LanguageModel> {
 /**
  * 根据提供商ID和模型名称获取模型
  */
-export async function getModelByProviderAndName(
+export async function getLanguageModelByProviderAndName(
   providerId: string,
   modelName: string
-): Promise<LanguageModel> {
+): Promise<LanguageModelResult> {
   const providers = await ModelProviderService.getAllProviders();
   const provider = providers.find((p) => p.id === providerId);
 
@@ -590,7 +626,22 @@ export async function getModelByProviderAndName(
     throw new Error(`提供商 ${provider.name} 不支持模型 ${modelName}`);
   }
 
-  return createModelFromProvider(provider, model.name);
+  const languageModel = createModelFromProvider(provider, model.name);
+
+  return {
+    provider,
+    modelName: model.name,
+    model: languageModel,
+    modelConfig: model,
+  };
+}
+
+export async function getModelByProviderAndName(
+  providerId: string,
+  modelName: string
+): Promise<LanguageModel> {
+  const { model } = await getLanguageModelByProviderAndName(providerId, modelName);
+  return model;
 }
 
 /**

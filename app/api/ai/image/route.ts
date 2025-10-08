@@ -4,6 +4,7 @@ import {
   type ModelProviderConfig,
   type ProviderModelConfig,
 } from '@/lib/ai/model-provider';
+import { resolveRequestHeaders } from '@/lib/ai/dynamic-config';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { logger } from '@/lib/logger/client';
 import OpenAI from 'openai';
@@ -287,26 +288,33 @@ async function generateWithOpenAI({
   size,
   modelMetadata,
 }: ImageGenerationArgs): Promise<ImageGenerationResult> {
+  const defaultHeaders = resolveRequestHeaders(provider, modelConfig);
   const openai = new OpenAI({
     apiKey: provider.apiKey,
     baseURL: provider.baseUrl,
+    ...(Object.keys(defaultHeaders).length ? { defaultHeaders } : {}),
     ...(customFetch ? { fetch: customFetch } : {}),
   });
 
   const normalizedFormat = normalizeOutputFormat(modelMetadata);
   const preferredResponseFormat = computePreferredResponseFormat(modelMetadata, 'url');
 
-  const response = await openai.images.generate({
+  const requestPayload: Parameters<typeof openai.images.generate>[0] = {
     model: modelConfig.name,
     prompt,
     n: 1,
-    size,
     ...(preferredResponseFormat === 'b64_json'
       ? { response_format: 'b64_json' as const }
       : {}),
-  });
+  };
 
-  const imageData = response.data[0];
+  if (typeof size === 'string' && size.trim()) {
+    (requestPayload as Record<string, unknown>).size = size;
+  }
+
+  const response = await openai.images.generate(requestPayload);
+
+  const imageData = response.data?.[0];
   if (!imageData) {
     throw new Error('图片生成失败：未返回图片数据');
   }
@@ -375,11 +383,9 @@ async function generateWithGoogle({
     init.baseURL = baseURL;
   }
 
-  const headers = sanitizeMetadataRecord(
-    getMetadataObject(provider.metadata, 'headers', 'customHeaders')
-  );
-  if (headers && Object.keys(headers).length) {
-    init.headers = headers;
+  const combinedHeaders = resolveRequestHeaders(provider, modelConfig);
+  if (Object.keys(combinedHeaders).length) {
+    init.headers = combinedHeaders;
   }
 
   const query = sanitizeMetadataRecord(
@@ -393,6 +399,7 @@ async function generateWithGoogle({
   const imageModel = googleProvider.image(modelConfig.name);
 
   const aspectRatio = toAspectRatio(size);
+  const aspectRatioForRequest = aspectRatio as `${number}:${number}` | undefined;
   const providerOptions =
     modelMetadata.providerOptions &&
     typeof modelMetadata.providerOptions === 'object' &&
@@ -404,40 +411,61 @@ async function generateWithGoogle({
     prompt,
     model: modelConfig.name,
     aspectRatio,
-    baseURL, init,
+    baseURL,
+    init,
     providerOptions,
     size,
-    headers,
+    headers: combinedHeaders,
     modelMetadata: sanitizeMetadataRecord(modelMetadata),
-  })
-
-  const generation = await generateImage({
-    model: imageModel,
-    prompt,
-    ...(aspectRatio ? { aspectRatio } : {}),
-    ...(providerOptions && Object.keys(providerOptions).length
-      ? { providerOptions }
-      : {}),
   });
 
-  const primary = generation.image ?? generation.images?.[0];
-  if (!primary) {
-    throw new Error('图片生成失败：未返回图片数据');
+  try {
+    const generation = await generateImage({
+      model: imageModel,
+      prompt,
+      ...(aspectRatioForRequest ? { aspectRatio: aspectRatioForRequest } : {}),
+      ...(providerOptions && Object.keys(providerOptions).length
+        ? { providerOptions }
+        : {}),
+    });
+
+    const primary = generation.image ?? generation.images?.[0];
+    if (!primary) {
+      throw new Error('图片生成失败：未返回图片数据');
+    }
+
+    const buffer = Buffer.from(primary);
+    const format = normalizeOutputFormat(modelMetadata) ?? 'png';
+    const contentType = `image/${format}`;
+    const metadata = sanitizeMetadataRecord({
+      providerMetadata: generation.providerMetadata,
+    });
+
+    return {
+      buffer,
+      contentType,
+      extension: format,
+      metadata,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await logger.warn('Google Generative AI 图片生成失败，尝试 generateContent 兼容模式', 'ai-image', {
+      error: message,
+      model: modelConfig.name,
+    });
+
+    return await generateGeminiImageViaGenerateContent({
+      provider,
+      modelConfig,
+      modelMetadata,
+      prompt,
+      aspectRatio: aspectRatioForRequest,
+      providerOptions,
+      headers: combinedHeaders,
+      baseURL,
+      query,
+    });
   }
-
-  const buffer = Buffer.from(primary);
-  const format = normalizeOutputFormat(modelMetadata) ?? 'png';
-  const contentType = `image/${format}`;
-  const metadata = sanitizeMetadataRecord({
-    providerMetadata: generation.providerMetadata,
-  });
-
-  return {
-    buffer,
-    contentType,
-    extension: format,
-    metadata,
-  };
 }
 
 async function generateWithMetaChatMidjourney(args: ImageGenerationArgs): Promise<ImageGenerationResult> {
@@ -457,6 +485,164 @@ async function generateWithMetaChatMidjourney(args: ImageGenerationArgs): Promis
       return undefined;
     },
   });
+}
+
+type GeminiGenerateContentArgs = {
+  provider: ModelProviderConfig;
+  modelConfig: ProviderModelConfig;
+  modelMetadata: Record<string, unknown>;
+  prompt: string;
+  aspectRatio?: `${number}:${number}`;
+  providerOptions?: Record<string, unknown>;
+  headers: Record<string, string>;
+  baseURL?: string;
+  query?: Record<string, unknown>;
+};
+
+async function generateGeminiImageViaGenerateContent(
+  args: GeminiGenerateContentArgs
+): Promise<ImageGenerationResult> {
+  const {
+    provider,
+    modelConfig,
+    modelMetadata,
+    prompt,
+    aspectRatio,
+    providerOptions,
+    headers,
+    baseURL,
+    query,
+  } = args;
+
+  const fetchImpl = customFetch ?? fetch;
+  const format = normalizeOutputFormat(modelMetadata) ?? 'png';
+  const effectiveBaseUrl = normalizeBaseUrl(
+    baseURL || 'https://generativelanguage.googleapis.com/v1beta'
+  );
+
+  const endpoint = new URL(
+    `models/${modelConfig.name}:generateContent`,
+    `${effectiveBaseUrl}/`
+  );
+
+  const queryRecord = toStringRecord(query as Record<string, unknown> | undefined);
+  for (const [key, value] of Object.entries(queryRecord)) {
+    endpoint.searchParams.set(key, value);
+  }
+
+  const requestHeaders: Record<string, string> = {
+    'content-type': 'application/json',
+  };
+  for (const [key, value] of Object.entries(headers)) {
+    requestHeaders[key] = value;
+  }
+
+  const hasApiKeyHeader = Object.keys(requestHeaders).some(
+    (key) => key.toLowerCase() === 'x-goog-api-key'
+  );
+  if (!hasApiKeyHeader && provider.apiKey) {
+    requestHeaders['x-goog-api-key'] = provider.apiKey;
+  }
+
+  const config: Record<string, unknown> = {
+    response_mime_type: `image/${format}`,
+  };
+  if (aspectRatio) {
+    config.image_config = { aspect_ratio: aspectRatio };
+  }
+
+  if (providerOptions && Object.keys(providerOptions).length) {
+    const { aspectRatio: overriddenAspectRatio, ...rest } = providerOptions;
+    if (overriddenAspectRatio && typeof overriddenAspectRatio === 'string') {
+      config.image_config = {
+        aspect_ratio: overriddenAspectRatio as `${number}:${number}`,
+      };
+    }
+    if (Object.keys(rest).length) {
+      Object.assign(config, rest);
+    }
+  }
+
+  const requestBody: Record<string, unknown> = {
+    contents: [
+      {
+        role: 'user',
+        parts: [{ text: prompt }],
+      },
+    ],
+    generationConfig: {
+      responseModalities: [
+        "TEXT",
+        "IMAGE"
+      ]
+    },
+    ...(Object.keys(config).length ? { config } : {}),
+  };
+
+  const response = await fetchImpl(endpoint.toString(), {
+    method: 'POST',
+    headers: requestHeaders,
+    body: JSON.stringify(requestBody),
+  });
+
+  const raw = await response.text();
+  if (!response.ok) {
+    throw new Error(
+      `Gemini generateContent 请求失败 (${response.status}): ${raw || response.statusText}`
+    );
+  }
+
+  let parsed: any;
+  try {
+    parsed = raw ? JSON.parse(raw) : {};
+  } catch (error) {
+    throw new Error(`Gemini generateContent 响应解析失败: ${(error as Error).message}`);
+  }
+
+  const inlinePayload = extractGeminiInlineImage(parsed);
+  if (!inlinePayload) {
+    throw new Error('Gemini generateContent 未返回图片数据');
+  }
+
+  const buffer = Buffer.from(inlinePayload.data, 'base64');
+  const contentType = inlinePayload.mimeType || `image/${format}`;
+  const metadata = sanitizeMetadataRecord({ providerMetadata: parsed });
+
+  return {
+    buffer,
+    contentType,
+    extension: format,
+    metadata,
+  };
+}
+
+function extractGeminiInlineImage(payload: any):
+  | { data: string; mimeType?: string }
+  | undefined {
+  const candidates = payload?.candidates;
+  if (!Array.isArray(candidates)) return undefined;
+
+  for (const candidate of candidates) {
+    const parts = candidate?.content?.parts;
+    if (!Array.isArray(parts)) continue;
+
+    for (const part of parts) {
+      const inline =
+        part?.inlineData ||
+        part?.inline_data ||
+        part?.fileData ||
+        part?.file_data ||
+        part?.media;
+      if (inline && typeof inline.data === 'string' && inline.data.trim()) {
+        return {
+          data: inline.data,
+          mimeType: inline.mimeType || inline.mime_type,
+        };
+      }
+    }
+  }
+
+  return undefined;
 }
 
 async function generateWithMetaChatFlux(args: ImageGenerationArgs): Promise<ImageGenerationResult> {
@@ -495,7 +681,7 @@ async function generateWithMetaChatBase(
   profile: MetaChatProfile
 ): Promise<ImageGenerationResult> {
   // 统一处理 MetaChat 任务的创建、轮询和结果下载，避免 MJ 与 FLUX 逻辑重复。
-  const metaConfig = resolveMetaChatConfig(provider, modelMetadata, profile.providerLabel);
+  const metaConfig = resolveMetaChatConfig(provider, modelConfig, modelMetadata, profile.providerLabel);
   const aspectRatio = toAspectRatio(size);
   const params = buildMetaChatParams(modelMetadata, provider.metadata, aspectRatio);
 
@@ -587,6 +773,7 @@ type MetaChatConfig = {
 
 function resolveMetaChatConfig(
   provider: ModelProviderConfig,
+  modelConfig: ProviderModelConfig,
   modelMetadata: Record<string, unknown>,
   providerLabel: string
 ): MetaChatConfig {
@@ -610,18 +797,17 @@ function resolveMetaChatConfig(
       METACHAT_DEFAULT_BASE_URL
   );
 
-  const providerHeaders = toStringRecord(
-    sanitizeMetadataRecord(getMetadataObject(providerMetadata, 'headers', 'customHeaders'))
-  );
-  const modelHeaders = toStringRecord(
-    sanitizeMetadataRecord(getMetadataObject(modelMetadata, 'headers', 'customHeaders'))
-  );
-
   const headers: Record<string, string> = {
-    ...providerHeaders,
-    ...modelHeaders,
+    ...resolveRequestHeaders(provider, modelConfig),
   };
-  headers['Content-Type'] = headers['Content-Type'] ?? 'application/json';
+
+  const hasContentType = Object.keys(headers).some(
+    (key) => key.toLowerCase() === 'content-type'
+  );
+  if (!hasContentType) {
+    headers['Content-Type'] = 'application/json';
+  }
+
   headers.Authorization = `Bearer ${apiKey}`;
   headers['X-App-ID'] = appId;
 
@@ -868,11 +1054,12 @@ async function generateWithVertex({
   size,
   modelMetadata,
 }: ImageGenerationArgs): Promise<ImageGenerationResult> {
-  const init = buildVertexInit(provider);
+  const init = buildVertexInit(provider, modelConfig);
   const vertexProvider = createVertex(init as Parameters<typeof createVertex>[0]);
   const imageModel = vertexProvider.image(modelConfig.name);
 
   const aspectRatio = toAspectRatio(size);
+  const aspectRatioForRequest = aspectRatio as `${number}:${number}` | undefined;
   const providerOptions =
     modelMetadata.providerOptions &&
     typeof modelMetadata.providerOptions === 'object' &&
@@ -883,7 +1070,7 @@ async function generateWithVertex({
   const generation = await generateImage({
     model: imageModel,
     prompt,
-    ...(aspectRatio ? { aspectRatio } : {}),
+    ...(aspectRatioForRequest ? { aspectRatio: aspectRatioForRequest } : {}),
     ...(providerOptions && Object.keys(providerOptions).length
       ? { providerOptions }
       : {}),
@@ -1016,7 +1203,10 @@ function normalizePrivateKeyString(value?: string) {
   return value ? value.replace(/\\n/g, '\n') : undefined;
 }
 
-function buildVertexInit(provider: ModelProviderConfig): Record<string, unknown> {
+function buildVertexInit(
+  provider: ModelProviderConfig,
+  modelConfig: ProviderModelConfig
+): Record<string, unknown> {
   const metadata = (provider.metadata || {}) as Record<string, unknown>;
   const init: Record<string, unknown> = {
     ...(customFetch ? { fetch: customFetch } : {}),
@@ -1049,9 +1239,9 @@ function buildVertexInit(provider: ModelProviderConfig): Record<string, unknown>
     init.baseURL = baseURL;
   }
 
-  const headers = sanitizeMetadataRecord(getMetadataObject(metadata, 'headers', 'customHeaders'));
-  if (headers && Object.keys(headers).length) {
-    init.headers = headers;
+  const combinedHeaders = resolveRequestHeaders(provider, modelConfig);
+  if (Object.keys(combinedHeaders).length) {
+    init.headers = combinedHeaders;
   }
 
   const query = sanitizeMetadataRecord(getMetadataObject(metadata, 'query', 'queryParams'));

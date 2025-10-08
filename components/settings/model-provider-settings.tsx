@@ -105,6 +105,85 @@ const FEATURE_PRESETS = {
 
 type FeaturePreset = keyof typeof FEATURE_PRESETS;
 
+interface KeyValueItem {
+  id: string;
+  key: string;
+  value: string;
+}
+
+function createKeyValueItem(key = '', value = ''): KeyValueItem {
+  const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2);
+  return { id, key, value };
+}
+
+function cloneKeyValueItems(items: KeyValueItem[] = []): KeyValueItem[] {
+  return items.map((item) => createKeyValueItem(item.key, item.value));
+}
+
+function headersObjectToList(raw: unknown): KeyValueItem[] {
+  let record: Record<string, unknown> | null = null;
+
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    record = raw as Record<string, unknown>;
+  } else if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        record = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  if (!record) return [];
+
+  const entries: KeyValueItem[] = [];
+  for (const [key, value] of Object.entries(record)) {
+    const trimmedKey = key.trim();
+    if (!trimmedKey) continue;
+
+    let stringValue: string | undefined;
+    if (typeof value === 'string') {
+      stringValue = value.trim();
+    } else if (typeof value === 'number' || typeof value === 'boolean') {
+      stringValue = String(value);
+    }
+
+    if (!stringValue) continue;
+    entries.push(createKeyValueItem(trimmedKey, stringValue));
+  }
+  return entries;
+}
+
+function headersListToObject(items: KeyValueItem[]): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const item of items) {
+    const key = item.key.trim();
+    const value = item.value.trim();
+    if (!key || !value) continue;
+    result[key] = value;
+  }
+  return result;
+}
+
+function mergeMetadataWithHeaders(
+  base: Record<string, any> | undefined,
+  headers: Record<string, string>
+): Record<string, any> {
+  const metadata = base ? { ...base } : {};
+
+  if (Object.keys(headers).length) {
+    metadata.headers = headers;
+  } else if ('headers' in metadata) {
+    delete metadata.headers;
+  }
+
+  return metadata;
+}
+
 function createProviderRows(
   providerName: string,
   providerHref: string,
@@ -310,6 +389,8 @@ interface ProviderModelForm {
   description?: string;
   capabilities: ModelCapability[];
   defaultFor: ModelCapability[];
+  metadata?: Record<string, any>;
+  headers?: KeyValueItem[];
 }
 
 interface ModelProvider {
@@ -321,7 +402,8 @@ interface ModelProvider {
   models: ProviderModelForm[];
   isDefault: boolean;
   isActive: boolean;
-  metadata?: Record<string, any>;
+  metadata: Record<string, any>;
+  headers: KeyValueItem[];
 }
 
 interface ProviderFormState {
@@ -331,6 +413,8 @@ interface ProviderFormState {
   baseUrl: string;
   models: ProviderModelForm[];
   isDefault: boolean;
+  metadata?: Record<string, any>;
+  headers: KeyValueItem[];
 }
 
 const PRESET_MODEL_LIBRARY: Record<string, ProviderModelForm[]> = {
@@ -379,6 +463,10 @@ function cloneModels(models: ProviderModelForm[]): ProviderModelForm[] {
     ...model,
     capabilities: [...model.capabilities],
     defaultFor: [...model.defaultFor],
+    metadata: model.metadata
+      ? JSON.parse(JSON.stringify(model.metadata))
+      : {},
+    headers: cloneKeyValueItems(model.headers || []),
   }));
 }
 
@@ -390,6 +478,8 @@ function createEmptyFormState(): ProviderFormState {
     baseUrl: '',
     models: [],
     isDefault: false,
+    metadata: {},
+    headers: [],
   };
 }
 
@@ -416,29 +506,51 @@ export function ModelProviderSettings() {
     try {
       const res = await fetch('/api/models?includeInactive=true');
       const data = await res.json();
-      const nextProviders: ModelProvider[] = (data.providers || []).map((provider: any) => ({
-        id: provider.id,
-        name: provider.name,
-        type: normalizeProviderType(provider.type),
-        apiKey: provider.apiKey,
-        baseUrl: provider.baseUrl || '',
-        models: Array.isArray(provider.models)
-          ? provider.models.map((model: any) => ({
-              name: model.name,
-              label: model.label,
-              description: model.description,
-              capabilities: Array.isArray(model.capabilities)
-                ? (model.capabilities as ModelCapability[])
-                : [],
-              defaultFor: Array.isArray(model.defaultFor)
-                ? (model.defaultFor as ModelCapability[])
-                : [],
-            }))
-          : [],
-        isDefault: provider.isDefault,
-        isActive: provider.isActive,
-        metadata: provider.metadata,
-      }));
+      const nextProviders: ModelProvider[] = (data.providers || []).map((provider: any) => {
+        const rawMetadata =
+          provider.metadata && typeof provider.metadata === 'object'
+            ? (provider.metadata as Record<string, unknown>)
+            : undefined;
+        const metadataClone = rawMetadata
+          ? JSON.parse(JSON.stringify(rawMetadata))
+          : undefined;
+        const providerHeaders = headersObjectToList(rawMetadata?.['headers']);
+
+        return {
+          id: provider.id,
+          name: provider.name,
+          type: normalizeProviderType(provider.type),
+          apiKey: provider.apiKey,
+          baseUrl: provider.baseUrl || '',
+          models: Array.isArray(provider.models)
+            ? provider.models.map((model: any) => {
+                const modelMetadata =
+                  model.metadata && typeof model.metadata === 'object'
+                    ? (model.metadata as Record<string, unknown>)
+                    : undefined;
+                return {
+                  name: model.name,
+                  label: model.label,
+                  description: model.description,
+                  capabilities: Array.isArray(model.capabilities)
+                    ? (model.capabilities as ModelCapability[])
+                    : [],
+                  defaultFor: Array.isArray(model.defaultFor)
+                    ? (model.defaultFor as ModelCapability[])
+                    : [],
+                  metadata: modelMetadata
+                    ? JSON.parse(JSON.stringify(modelMetadata))
+                    : undefined,
+                  headers: headersObjectToList(modelMetadata?.['headers']),
+                } satisfies ProviderModelForm;
+              })
+            : [],
+          isDefault: provider.isDefault,
+          isActive: provider.isActive,
+          metadata: metadataClone ?? {},
+          headers: providerHeaders,
+        } satisfies ModelProvider;
+      });
       setProviders(nextProviders);
     } catch (error) {
       console.error('获取模型提供商失败:', error);
@@ -465,12 +577,21 @@ export function ModelProviderSettings() {
         const defaultFor = Array.from(
           new Set(model.defaultFor.filter((capability) => capabilities.includes(capability)))
         );
+        const headersRecord = headersListToObject(model.headers ?? []);
+        const metadata = mergeMetadataWithHeaders(model.metadata, headersRecord);
+        const hasOriginalMetadata = !!(
+          model.metadata && Object.keys(model.metadata).length > 0
+        );
+        const shouldIncludeMetadata =
+          Object.keys(metadata).length > 0 || hasOriginalMetadata;
+
         return {
           name: model.name.trim(),
           label: model.label?.trim() || undefined,
           description: model.description?.trim() || undefined,
           capabilities,
           defaultFor,
+          ...(shouldIncludeMetadata ? { metadata } : {}),
         } satisfies ProviderModelForm;
       });
 
@@ -478,6 +599,15 @@ export function ModelProviderSettings() {
       alert('至少添加一个模型配置');
       return;
     }
+
+    const providerHeaders = headersListToObject(formData.headers);
+    const providerMetadata = mergeMetadataWithHeaders(formData.metadata, providerHeaders);
+    const hadProviderMetadata = !!(
+      (formData.metadata && Object.keys(formData.metadata).length > 0) ||
+      (editingProvider?.metadata && Object.keys(editingProvider.metadata).length > 0)
+    );
+    const shouldSendProviderMetadata =
+      Object.keys(providerMetadata).length > 0 || hadProviderMetadata;
 
     try {
       if (editingProvider) {
@@ -491,6 +621,7 @@ export function ModelProviderSettings() {
             baseUrl: formData.baseUrl || undefined,
             models: payloadModels,
             isDefault: formData.isDefault,
+            ...(shouldSendProviderMetadata ? { metadata: providerMetadata } : {}),
           }),
         });
       } else {
@@ -504,6 +635,7 @@ export function ModelProviderSettings() {
             baseUrl: formData.baseUrl || undefined,
             models: payloadModels,
             isDefault: formData.isDefault,
+            ...(shouldSendProviderMetadata ? { metadata: providerMetadata } : {}),
           }),
         });
       }
@@ -611,6 +743,11 @@ export function ModelProviderSettings() {
       baseUrl: provider.baseUrl || '',
       models: cloneModels(provider.models),
       isDefault: provider.isDefault,
+      metadata:
+        provider.metadata && Object.keys(provider.metadata).length > 0
+          ? JSON.parse(JSON.stringify(provider.metadata))
+          : {},
+      headers: cloneKeyValueItems(provider.headers),
     });
     setDialogOpen(true);
   };
@@ -624,6 +761,8 @@ export function ModelProviderSettings() {
           name: '',
           capabilities: ['text'],
           defaultFor: ['text'],
+          metadata: {},
+          headers: [],
         },
       ],
     }));
@@ -636,10 +775,75 @@ export function ModelProviderSettings() {
     }));
   };
 
+  const addProviderHeader = () => {
+    setFormData((prev) => ({
+      ...prev,
+      headers: [...prev.headers, createKeyValueItem()],
+    }));
+  };
+
+  const updateProviderHeader = (
+    index: number,
+    field: 'key' | 'value',
+    value: string
+  ) => {
+    setFormData((prev) => ({
+      ...prev,
+      headers: prev.headers.map((item, idx) =>
+        idx === index
+          ? {
+              ...item,
+              [field]: value,
+            }
+          : item
+      ),
+    }));
+  };
+
+  const removeProviderHeader = (index: number) => {
+    setFormData((prev) => ({
+      ...prev,
+      headers: prev.headers.filter((_, idx) => idx !== index),
+    }));
+  };
+
   const updateModel = (index: number, updater: (model: ProviderModelForm) => ProviderModelForm) => {
     setFormData((prev) => ({
       ...prev,
       models: prev.models.map((model, idx) => (idx === index ? updater(model) : model)),
+    }));
+  };
+
+  const addModelHeader = (index: number) => {
+    updateModel(index, (model) => ({
+      ...model,
+      headers: [...(model.headers ?? []), createKeyValueItem()],
+    }));
+  };
+
+  const updateModelHeader = (
+    modelIndex: number,
+    headerIndex: number,
+    field: 'key' | 'value',
+    value: string
+  ) => {
+    updateModel(modelIndex, (model) => ({
+      ...model,
+      headers: (model.headers ?? []).map((item, idx) =>
+        idx === headerIndex
+          ? {
+              ...item,
+              [field]: value,
+            }
+          : item
+      ),
+    }));
+  };
+
+  const removeModelHeader = (modelIndex: number, headerIndex: number) => {
+    updateModel(modelIndex, (model) => ({
+      ...model,
+      headers: (model.headers ?? []).filter((_, idx) => idx !== headerIndex),
     }));
   };
 
@@ -770,6 +974,41 @@ export function ModelProviderSettings() {
                     placeholder="https://api.example.com/v1"
                   />
                 </div>
+                <div className="md:col-span-2 space-y-2">
+                  <div>
+                    <Label>自定义 Headers（可选）</Label>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      将在调用该提供商下任意模型时附加到请求中，可用于私有网关、租户标识等场景。
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    {formData.headers.map((item, idx) => (
+                      <div key={item.id} className="flex gap-2">
+                        <Input
+                          placeholder="Header 名称"
+                          value={item.key}
+                          onChange={(e) => updateProviderHeader(idx, 'key', e.target.value)}
+                        />
+                        <Input
+                          placeholder="Header 值"
+                          value={item.value}
+                          onChange={(e) => updateProviderHeader(idx, 'value', e.target.value)}
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          onClick={() => removeProviderHeader(idx)}
+                          aria-label="删除 Header"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                  <Button type="button" variant="outline" size="sm" onClick={addProviderHeader}>
+                    <Plus className="mr-2 h-4 w-4" /> 添加 Header
+                  </Button>
+                </div>
               </div>
 
               <div className="flex items-center gap-2">
@@ -883,6 +1122,49 @@ export function ModelProviderSettings() {
                               </div>
                             </div>
                           )}
+
+                          <div className="space-y-2">
+                            <Label className="block text-sm font-medium">模型级 Headers（可选）</Label>
+                            <p className="text-xs text-muted-foreground">
+                              会与服务商 Headers 合并，模型配置可覆盖同名项。
+                            </p>
+                            <div className="space-y-2">
+                              {(model.headers ?? []).map((item, headerIdx) => (
+                                <div key={item.id} className="flex gap-2">
+                                  <Input
+                                    placeholder="Header 名称"
+                                    value={item.key}
+                                    onChange={(e) =>
+                                      updateModelHeader(index, headerIdx, 'key', e.target.value)
+                                    }
+                                  />
+                                  <Input
+                                    placeholder="Header 值"
+                                    value={item.value}
+                                    onChange={(e) =>
+                                      updateModelHeader(index, headerIdx, 'value', e.target.value)
+                                    }
+                                  />
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    onClick={() => removeModelHeader(index, headerIdx)}
+                                    aria-label="删除模型 Header"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              ))}
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => addModelHeader(index)}
+                            >
+                              <Plus className="mr-2 h-4 w-4" /> 添加模型 Header
+                            </Button>
+                          </div>
                         </div>
                         <Button
                           type="button"

@@ -1,6 +1,11 @@
 import { streamText, generateText, type LanguageModel } from 'ai';
 import { DEFAULT_MODEL, AI_CONFIG } from './config';
-import { getDefaultModel, getModelByProviderAndName } from './dynamic-config';
+import {
+  getDefaultLanguageModel,
+  getLanguageModelByProviderAndName,
+  resolveRequestHeaders,
+  type LanguageModelResult,
+} from './dynamic-config';
 import { PROMPT_TEMPLATES, type PromptType } from './prompts';
 import type { IAIResponse } from './types';
 import { logger } from '@/lib/logger/client';
@@ -104,18 +109,14 @@ export class AIClient {
         input: trimmedInput,
       });
 
-      // 获取模型
-      let model: LanguageModel;
-      if (options?.providerId && options?.modelName) {
-        model = await getModelByProviderAndName(options.providerId, options.modelName);
-      } else {
-        try {
-          model = await getDefaultModel();
-        } catch {
-          // 如果没有配置默认模型，回退到原始配置
-          model = DEFAULT_MODEL;
-        }
-      }
+      const {
+        model,
+        info: modelInfo,
+        headers: requestHeaders,
+      } = await this.resolveLanguageModelInstance({
+        providerId: options?.providerId,
+        modelName: options?.modelName,
+      });
 
       if (snippetId) {
         await logger.logSnippet(
@@ -128,8 +129,10 @@ export class AIClient {
 
       await logger.debug(`AI 生成请求: ${type}`, 'ai-client', {
         type,
-        model: model.modelId,
-        provider: model.providerId,
+        providerId: modelInfo?.provider.id ?? 'fallback',
+        providerName: modelInfo?.provider.name ?? 'default-config',
+        modelName: modelInfo?.modelConfig.name ?? 'DEFAULT_MODEL',
+        headerKeys: Object.keys(requestHeaders),
         system: systemPrompt,
         input: finalPrompt,
         temperature: AI_CONFIG.defaultTemperature,
@@ -142,6 +145,9 @@ export class AIClient {
           system: systemPrompt,
           prompt: finalPrompt,
           temperature: AI_CONFIG.defaultTemperature,
+          ...(Object.keys(requestHeaders).length
+            ? { headers: requestHeaders }
+            : {}),
         });
 
         return aiResult;
@@ -244,19 +250,6 @@ export class AIClient {
         input: trimmedInput,
       });
 
-      // 获取模型
-      let model: LanguageModel;
-      if (options?.providerId && options?.modelName) {
-        model = await getModelByProviderAndName(options.providerId, options.modelName);
-      } else {
-        try {
-          model = await getDefaultModel();
-        } catch {
-          // 如果没有配置默认模型，回退到原始配置
-          model = DEFAULT_MODEL;
-        }
-      }
-
       if (snippetId) {
         await logger.logSnippet(
           `开始流式生成: ${type}, 输入长度: ${finalPrompt.length}`,
@@ -266,11 +259,23 @@ export class AIClient {
         );
       }
 
+      const {
+        model,
+        info: streamModelInfo,
+        headers: streamRequestHeaders,
+      } = await this.resolveLanguageModelInstance({
+        providerId: options?.providerId,
+        modelName: options?.modelName,
+      });
+
       await logger.debug(`AI 流式生成请求: ${type}`, 'ai-client', {
         type,
-        model: model.modelId,
+        providerId: streamModelInfo?.provider.id ?? 'fallback',
+        providerName: streamModelInfo?.provider.name ?? 'default-config',
+        modelName: streamModelInfo?.modelConfig.name ?? 'DEFAULT_MODEL',
+        headerKeys: Object.keys(streamRequestHeaders),
         system: systemPrompt,
-        prompt: finalPrompt,
+        input: finalPrompt,
         temperature: AI_CONFIG.defaultTemperature,
         maxTokens: AI_CONFIG.maxTokens,
       });
@@ -280,6 +285,9 @@ export class AIClient {
         system: systemPrompt,
         prompt: finalPrompt,
         temperature: AI_CONFIG.defaultTemperature,
+        ...(Object.keys(streamRequestHeaders).length
+          ? { headers: streamRequestHeaders }
+          : {}),
       });
 
       if (snippetId) {
@@ -312,5 +320,49 @@ export class AIClient {
   private static calculateCost(tokens: number): number {
     const costPer1kTokens = 0.03;
     return (tokens / 1000) * costPer1kTokens;
+  }
+
+  private static async resolveLanguageModelInstance({
+    providerId,
+    modelName,
+  }: {
+    providerId?: string;
+    modelName?: string;
+  }): Promise<{
+    model: LanguageModel;
+    info?: LanguageModelResult;
+    headers: Record<string, string>;
+  }> {
+    const fallback = {
+      model: DEFAULT_MODEL as LanguageModel,
+      info: undefined,
+      headers: {} as Record<string, string>,
+    };
+
+    try {
+      let result: LanguageModelResult;
+
+      if (providerId && modelName) {
+        result = await getLanguageModelByProviderAndName(providerId, modelName);
+      } else {
+        result = await getDefaultLanguageModel();
+      }
+
+      const headers = resolveRequestHeaders(result.provider, result.modelConfig);
+
+      return {
+        model: result.model,
+        info: result,
+        headers,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await logger.warn('模型实例解析失败，使用默认模型', 'ai-client', {
+        providerId,
+        modelName,
+        error: message,
+      });
+      return fallback;
+    }
   }
 }
