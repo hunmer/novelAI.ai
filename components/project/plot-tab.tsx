@@ -1,27 +1,7 @@
 'use client';
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type DragEvent,
-  type FormEvent,
-  type MouseEvent,
-} from 'react';
-import {
-  AlignLeft,
-  Loader2,
-  MessageCircle,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Pencil,
-  Plus,
-  RefreshCcw,
-  Sparkles,
-  Trash2,
-} from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
+import { Loader2, PanelLeftClose, PanelLeftOpen, Plus, RefreshCcw, Sparkles, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -36,36 +16,44 @@ import {
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import type {
-  FlowgramChoicesSegment,
-  FlowgramSegment,
-  PlotNode,
-  PlotNodeKind,
-  PlotRecord,
-} from '@/lib/types/plot';
+import type { FlowgramChoicesSegment, FlowgramSegment, PlotNode, PlotNodeKind, PlotRecord } from '@/lib/types/plot';
 import { cn } from '@/lib/utils';
-import ReactFlow, {
-  Background,
-  Controls,
-  Edge,
-  Handle,
-  Node,
-  NodeProps,
-  Position,
-  ReactFlowInstance,
-  ReactFlowProvider,
-  NodeToolbar,
-  useNodesState,
-  type XYPosition,
-} from 'reactflow';
+import { FlowTimeline, type FlowTimelineController } from '@/components/project/plot/flow-timeline';
+import { NodeEditorDialog, type NodeEditorFormValues } from '@/components/project/plot/node-editor-dialog';
+import { AiResponsePanel } from '@/components/project/plot/ai-response-panel';
+import { FLOW_BRANCH_OFFSET_X, FLOW_NODE_DRAG_TYPE, FLOW_NODE_VERTICAL_GAP } from '@/components/project/plot/constants';
+import type { XYPosition } from 'reactflow';
+
+function positionNodesByOrder(
+  controller: FlowTimelineController | null,
+  plot: PlotRecord,
+  nodeIds: string[],
+  dropPosition?: XYPosition
+) {
+  if (!controller || !nodeIds.length) return;
+  const nodesList = plot.workflow.nodes;
+  nodeIds.forEach((nodeId, index) => {
+    const nodeIndex = nodesList.findIndex((node) => node.id === nodeId);
+    if (nodeIndex < 0) return;
+    const node = nodesList[nodeIndex];
+    const hasParent =
+      typeof node.fromOptionId === 'string' &&
+      nodesList.some((candidate) => candidate.id === node.fromOptionId);
+    const isLastWithDrop = !!dropPosition && index === nodeIds.length - 1;
+    const isBranchNode = node.kind === 'branch';
+    const baseX = hasParent ? FLOW_BRANCH_OFFSET_X : 0;
+    const targetX = isBranchNode
+      ? isLastWithDrop
+        ? dropPosition!.x
+        : 0
+      : isLastWithDrop
+      ? dropPosition!.x
+      : baseX;
+    const targetY = nodeIndex * FLOW_NODE_VERTICAL_GAP;
+    controller.setNodePosition(nodeId, { x: targetX, y: targetY });
+  });
+}
+
 
 function composePlotContext(plot: PlotRecord | null | undefined): string {
   if (!plot) {
@@ -118,6 +106,13 @@ function clampWordBudget(value: number): number {
   return Math.min(WORD_BUDGET_MAX, Math.max(WORD_BUDGET_MIN, Math.round(value)));
 }
 
+function sanitizeSegments(value: unknown): FlowgramSegment[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((segment): segment is FlowgramSegment => {
+    return !!segment && typeof segment === 'object' && 'type' in segment;
+  });
+}
+
 interface PromptOption {
   id: string;
   name: string;
@@ -150,11 +145,6 @@ interface NodeEditorFormValues {
 }
 
 const FLOW_NODE_DRAG_TYPE = 'application/reactflow';
-const DEFAULT_NODE_HEIGHT = 200;
-const DEFAULT_NODE_WIDTH = 360;
-const FLOW_VERTICAL_MARGIN = 48;
-const FLOW_HORIZONTAL_MARGIN = 64;
-
 function buildWorkflowPayload(nodes: PlotNode[]) {
   return {
     nodes: nodes.map((node) => ({
@@ -164,6 +154,7 @@ function buildWorkflowPayload(nodes: PlotNode[]) {
       character: node.character,
       action: node.action,
       fromOptionId: node.fromOptionId ?? null,
+      prompt: node.prompt ?? null,
       createdAt: node.createdAt,
     })),
   };
@@ -182,7 +173,9 @@ export function PlotTab({ projectId }: PlotTabProps) {
   const [mutatingNodes, setMutatingNodes] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [aiUsage, setAiUsage] = useState<{ tokens: number; cost: number } | null>(null);
+  const [aiSegments, setAiSegments] = useState<FlowgramSegment[]>([]);
   const [wordBudget, setWordBudget] = useState<number>(800);
+  const [branchGenerating, setBranchGenerating] = useState<Record<string, boolean>>({});
   const [showPlotList, setShowPlotList] = useState(true);
   const [autoInsertNodes, setAutoInsertNodes] = useState(true);
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
@@ -265,7 +258,7 @@ export function PlotTab({ projectId }: PlotTabProps) {
           ? true
           : node.kind === 'dialogue' && (node.character ?? '') === nodeCharacterFilter;
       const matchesKeyword = keyword
-        ? [node.text, node.character ?? '', node.action ?? '']
+        ? [node.text, node.character ?? '', node.action ?? '', node.prompt ?? '']
             .join(' ')
             .toLowerCase()
             .includes(keyword)
@@ -286,6 +279,11 @@ export function PlotTab({ projectId }: PlotTabProps) {
         title: '旁白',
         description: '用于环境描写或剧情过渡。',
       },
+      {
+        kind: 'branch' as PlotNodeKind,
+        title: '故事分支',
+        description: '填写提示词并生成新的分支剧情。',
+      },
     ],
     []
   );
@@ -304,12 +302,16 @@ export function PlotTab({ projectId }: PlotTabProps) {
   }, [selectedPlot?.id]);
 
   useEffect(() => {
+    setAiSegments([]);
+    setBranchGenerating({});
+  }, [selectedPlot?.id]);
+
+  useEffect(() => {
     if (activeNodeId && !plotNodes.some((node) => node.id === activeNodeId)) {
       setActiveNodeId(null);
     }
   }, [activeNodeId, plotNodes]);
 
-  const lastSegments = selectedPlot?.metadata.lastSegments ?? [];
   const contextPreview = useMemo(() => composePlotContext(selectedPlot), [selectedPlot]);
   const resolvePromptTemplate = useCallback(
     (template: string) => applyPromptPlaceholders(template, contextPreview),
@@ -389,6 +391,7 @@ export function PlotTab({ projectId }: PlotTabProps) {
       const plot: PlotRecord = data.plot;
       setPlots((prev) => [plot, ...prev]);
       setSelectedPlotId(plot.id);
+      setAiSegments([]);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : '创建剧情失败');
     }
@@ -435,6 +438,7 @@ export function PlotTab({ projectId }: PlotTabProps) {
       const data = await response.json();
       const updated: PlotRecord = data.plot;
       setPlots((prev) => prev.map((plot) => (plot.id === updated.id ? updated : plot)));
+      setAiSegments([]);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : '重置剧情失败');
     }
@@ -452,6 +456,7 @@ export function PlotTab({ projectId }: PlotTabProps) {
       if (!response.ok) throw new Error('删除剧情失败');
       setPlots((prev) => prev.filter((plot) => plot.id !== selectedPlot.id));
       setSelectedPlotId((prev) => (prev === selectedPlot.id ? null : prev));
+      setAiSegments([]);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : '删除剧情失败');
     }
@@ -487,6 +492,7 @@ export function PlotTab({ projectId }: PlotTabProps) {
       const appendedNodeIds: string[] = Array.isArray(data.appendedNodeIds) ? data.appendedNodeIds : [];
       setPlots((prev) => prev.map((plot) => (plot.id === updated.id ? updated : plot)));
       setAiUsage(data.usage ?? null);
+      setAiSegments(sanitizeSegments((data as { segments?: unknown }).segments));
       if (!selectedPlotId) {
         setSelectedPlotId(updated.id);
       }
@@ -531,6 +537,7 @@ export function PlotTab({ projectId }: PlotTabProps) {
       const latestNode = updated.workflow.nodes[updated.workflow.nodes.length - 1];
       if (latestNode) {
         focusNodeById(latestNode.id);
+        positionNodesByOrder(flowControllerRef.current, updated, [latestNode.id]);
       }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : '插入分支失败');
@@ -567,9 +574,7 @@ export function PlotTab({ projectId }: PlotTabProps) {
         : null;
       if (newNodeId) {
         focusNodeById(newNodeId);
-        if (dropPosition) {
-          flowControllerRef.current?.setNodePosition(newNodeId, dropPosition);
-        }
+        positionNodesByOrder(flowControllerRef.current, updated, [newNodeId], dropPosition);
       }
       return newNodeId;
     },
@@ -607,6 +612,120 @@ export function PlotTab({ projectId }: PlotTabProps) {
     [selectedPlot, selectedPlotId, setPlots, setSelectedPlotId, focusNodeById]
   );
 
+  
+  const createBranchNode = useCallback(
+    async (dropPosition?: XYPosition) => {
+      if (!selectedPlot) {
+        setErrorMessage('请先选择剧情');
+        return;
+      }
+      try {
+        setNodeEditorError(null);
+        setMutatingNodes(true);
+        await appendNode(
+          {
+            kind: 'branch',
+            text: '',
+            prompt: '',
+          },
+          dropPosition
+        );
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : '创建分支节点失败');
+      } finally {
+        setMutatingNodes(false);
+      }
+    },
+    [appendNode, selectedPlot, setErrorMessage]
+  );
+
+  const handleBranchPromptChange = useCallback(
+    async (nodeId: string, prompt: string) => {
+      if (!selectedPlot) return;
+      const current = selectedPlot.workflow.nodes.find((node) => node.id === nodeId);
+      if (!current) return;
+      const trimmed = prompt.trim();
+      if ((current.prompt ?? '') === trimmed) return;
+      const updatedNodes = selectedPlot.workflow.nodes.map((node) =>
+        node.id === nodeId ? { ...node, prompt: trimmed } : node
+      );
+      try {
+        await overwriteWorkflow(updatedNodes);
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : '更新分支提示词失败');
+      }
+    },
+    [overwriteWorkflow, selectedPlot, setErrorMessage]
+  );
+
+  const handleBranchGenerate = useCallback(
+    async (nodeId: string, promptOverride?: string) => {
+      if (!selectedPlot) return;
+      setErrorMessage(null);
+      const branchNode = selectedPlot.workflow.nodes.find((node) => node.id === nodeId);
+      if (!branchNode) return;
+      const promptSource = typeof promptOverride === 'string' ? promptOverride : branchNode.prompt ?? '';
+      const prompt = promptSource.trim();
+      if (!prompt) {
+        setErrorMessage('请先填写剧情发展提示词');
+        return;
+      }
+      if (promptOverride !== undefined && prompt !== (branchNode.prompt ?? '').trim()) {
+        await handleBranchPromptChange(nodeId, prompt);
+      }
+      const resolvedPrompt = resolvePromptTemplate(prompt);
+      try {
+        setBranchGenerating((prev) => ({ ...prev, [nodeId]: true }));
+        const response = await fetch(`/api/plots/${selectedPlot.id}/ai`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: resolvedPrompt,
+            wordBudget: sanitizedWordBudget,
+            autoInsert: true,
+            sourceNodeId: nodeId,
+          }),
+        });
+        if (!response.ok) {
+          const data = await response.json().catch(() => null);
+          throw new Error((data as { error?: string } | null)?.error ?? '生成剧情失败');
+        }
+        const data = await response.json();
+        const updated: PlotRecord = data.plot;
+        const appendedNodeIds: string[] = Array.isArray(data.appendedNodeIds) ? data.appendedNodeIds : [];
+        setPlots((prev) => prev.map((plot) => (plot.id === updated.id ? updated : plot)));
+        setAiUsage(data.usage ?? null);
+        setAiSegments(sanitizeSegments((data as { segments?: unknown }).segments));
+        if (!selectedPlotId) {
+          setSelectedPlotId(updated.id);
+        }
+        positionNodesByOrder(flowControllerRef.current, updated, appendedNodeIds);
+        if (appendedNodeIds.length) {
+          focusNodeById(appendedNodeIds[appendedNodeIds.length - 1]);
+        }
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : '生成剧情失败');
+      } finally {
+        setBranchGenerating((prev) => {
+          const next = { ...prev };
+          delete next[nodeId];
+          return next;
+        });
+      }
+    },
+    [
+      focusNodeById,
+      handleBranchPromptChange,
+      resolvePromptTemplate,
+      sanitizedWordBudget,
+      selectedPlot,
+      selectedPlotId,
+      setPlots,
+      setSelectedPlotId,
+      setErrorMessage,
+    ]
+  );
+
   const handleCloneNode = useCallback(
     async (nodeId: string) => {
       if (!selectedPlot) return;
@@ -621,6 +740,7 @@ export function PlotTab({ projectId }: PlotTabProps) {
           character: sourceNode.kind === 'dialogue' ? sourceNode.character : undefined,
           action: sourceNode.kind === 'dialogue' ? sourceNode.action : undefined,
           fromOptionId: sourceNode.fromOptionId ?? null,
+          prompt: sourceNode.kind === 'branch' ? sourceNode.prompt ?? '' : undefined,
         });
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : '克隆节点失败');
@@ -638,9 +758,13 @@ export function PlotTab({ projectId }: PlotTabProps) {
         return;
       }
       setNodeEditorError(null);
+      if (kind === 'branch') {
+        void createBranchNode(position);
+        return;
+      }
       setNodeEditorState({ mode: 'create', kind, dropPosition: position });
     },
-    [selectedPlot, setErrorMessage]
+    [createBranchNode, selectedPlot, setErrorMessage]
   );
 
   const openCreateNodeDialog = useCallback(
@@ -650,9 +774,13 @@ export function PlotTab({ projectId }: PlotTabProps) {
         return;
       }
       setNodeEditorError(null);
+       if (kind === 'branch') {
+        void createBranchNode();
+        return;
+      }
       setNodeEditorState({ mode: 'create', kind });
     },
-    [selectedPlot, setErrorMessage]
+    [createBranchNode, selectedPlot, setErrorMessage]
   );
 
   const openEditNodeDialog = useCallback((node: PlotNode) => {
@@ -668,6 +796,10 @@ export function PlotTab({ projectId }: PlotTabProps) {
   const handleNodeEditorSubmit = useCallback(
     async (values: NodeEditorFormValues) => {
       if (!nodeEditorState || !selectedPlot) return;
+      if (nodeEditorState.kind === 'branch') {
+        setNodeEditorError('分支节点请在画布内编辑');
+        return;
+      }
       const text = values.text.trim();
       if (!text) {
         setNodeEditorError('请输入节点内容');
@@ -866,6 +998,9 @@ export function PlotTab({ projectId }: PlotTabProps) {
               onDeleteNode={(nodeId) => void handleDeleteNode(nodeId)}
               onCloneNode={(nodeId) => void handleCloneNode(nodeId)}
               onEditNode={openEditNodeDialog}
+              onBranchPromptChange={handleBranchPromptChange}
+              onBranchGenerate={(nodeId, prompt) => void handleBranchGenerate(nodeId, prompt)}
+              branchGenerating={branchGenerating}
             />
           </div>
         </Card>
@@ -961,24 +1096,7 @@ export function PlotTab({ projectId }: PlotTabProps) {
                   tokens: {aiUsage.tokens} · cost: ${aiUsage.cost.toFixed(4)}
                 </div>
               ) : null}
-              <div className="space-y-3 rounded border border-muted bg-background/60 p-3">
-                <h3 className="text-sm font-semibold">AI 回复结果</h3>
-                <div className="max-h-64 space-y-3 overflow-y-auto pr-2 text-sm">
-                  {lastSegments.length ? (
-                    lastSegments.map((segment, index) => (
-                      <SegmentPreview
-                        key={`${segment.type}-${index}`}
-                        segment={segment}
-                        onInsertChoice={(option) => void handleUseChoice(option)}
-                      />
-                    ))
-                  ) : (
-                    <div className="rounded border border-dashed border-muted p-4 text-center text-xs text-muted-foreground">
-                      暂无AI回复，先尝试生成剧情节点
-                    </div>
-                  )}
-                </div>
-              </div>
+              <AiResponsePanel segments={aiSegments} onInsertChoice={(option) => void handleUseChoice(option)} />
             </TabsContent>
             <TabsContent value="insert" className="mt-4 flex flex-1 flex-col gap-4">
               <div className="grid gap-3 sm:grid-cols-1">
@@ -1040,7 +1158,8 @@ export function PlotTab({ projectId }: PlotTabProps) {
                     <SelectItem value="all">全部类型</SelectItem>
                     <SelectItem value="dialogue">角色消息</SelectItem>
                     <SelectItem value="narration">旁白</SelectItem>
-                  </SelectContent>
+                    <SelectItem value="branch">故事分支</SelectItem>
+            </SelectContent>
                 </Select>
               </div>
               <div className="flex-1 space-y-3 overflow-y-auto pr-2">
@@ -1060,7 +1179,7 @@ export function PlotTab({ projectId }: PlotTabProps) {
                         )}
                       >
                         <div className="flex items-center justify-between text-sm font-semibold">
-                          <span>第 {order} 节点 · {node.kind === 'dialogue' ? '角色消息' : '旁白'}</span>
+                          <span>第 {order} 节点 · {node.kind === 'dialogue' ? '角色消息' : node.kind === 'branch' ? '故事分支' : '旁白'}</span>
                           {node.kind === 'dialogue' && node.character ? (
                             <span className="text-xs text-muted-foreground">角色：{node.character}</span>
                           ) : null}
@@ -1068,7 +1187,13 @@ export function PlotTab({ projectId }: PlotTabProps) {
                         {node.kind === 'dialogue' && node.action ? (
                           <div className="mt-1 text-xs text-muted-foreground">动作：{node.action}</div>
                         ) : null}
-                        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{node.text}</p>
+                        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                          {node.kind === 'branch'
+                            ? node.prompt?.trim()
+                              ? `提示词：${node.prompt.trim()}`
+                              : '提示词未填写'
+                            : node.text}
+                        </p>
                         {node.fromOptionId ? (
                           <div className="mt-2 text-xs text-muted-foreground">来自分支 {node.fromOptionId}</div>
                         ) : null}
@@ -1114,611 +1239,5 @@ export function PlotTab({ projectId }: PlotTabProps) {
         onSubmit={handleNodeEditorSubmit}
       />
     </>
-  );
-}
-
-interface FlowTimelineProps {
-  nodes: PlotNode[];
-  selectedNodeId?: string | null;
-  onRegisterController?: (controller: FlowTimelineController) => void;
-  onNodeFocus?: (nodeId: string) => void;
-  onNodeDrop?: (kind: PlotNodeKind, position: XYPosition) => void;
-  onDeleteNode?: (nodeId: string) => void;
-  onCloneNode?: (nodeId: string) => void;
-  onEditNode?: (node: PlotNode) => void;
-}
-
-interface PlotFlowNodeData {
-  plotNode: PlotNode;
-  order: number;
-  onEdit?: (node: PlotNode) => void;
-}
-
-const FLOW_NODE_VERTICAL_GAP = 220;
-const FLOW_BRANCH_OFFSET_X = 280;
-const FLOW_CANVAS_MIN_HEIGHT = 640;
-
-function FlowTimeline({
-  nodes,
-  selectedNodeId,
-  onRegisterController,
-  onNodeFocus,
-  onNodeDrop,
-  onDeleteNode,
-  onCloneNode,
-  onEditNode,
-}: FlowTimelineProps) {
-  const nodeTypes = useMemo(
-    () => ({
-      dialogue: CharacterMessageNode,
-      narration: NarrationNode,
-    }),
-    []
-  );
-
-  const [flowNodes, setFlowNodes, onNodesChange] = useNodesState<Node<PlotFlowNodeData>>([]);
-  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
-  const wrapperRef = useRef<HTMLDivElement | null>(null);
-  const [contextMenu, setContextMenu] = useState<{ nodeId: string; x: number; y: number } | null>(null);
-
-  const closeContextMenu = useCallback(() => setContextMenu(null), []);
-
-  useEffect(() => {
-    setFlowNodes((previousNodes) => {
-      const previousMap = new Map(previousNodes.map((node) => [node.id, node]));
-      return nodes.map((plotNode, index) => {
-        const previous = previousMap.get(plotNode.id);
-        return {
-          id: plotNode.id,
-          type: plotNode.kind,
-          data: {
-            plotNode,
-            order: index + 1,
-            onEdit: onEditNode ? () => onEditNode(plotNode) : undefined,
-          },
-          position:
-            previous?.position ??
-            {
-              x: plotNode.fromOptionId ? FLOW_BRANCH_OFFSET_X : 0,
-              y: index * FLOW_NODE_VERTICAL_GAP,
-            },
-          draggable: true,
-          selectable: false,
-          selected: previous?.selected ?? false,
-        };
-      });
-    });
-  }, [nodes, onEditNode, setFlowNodes]);
-
-  useEffect(() => {
-    if (!selectedNodeId) {
-      setFlowNodes((prev) =>
-        prev.map((node) => (node.selected ? { ...node, selected: false } : node))
-      );
-      return;
-    }
-    setFlowNodes((prev) =>
-      prev.map((node) =>
-        node.id === selectedNodeId && !node.selected
-          ? { ...node, selected: true }
-          : node.id !== selectedNodeId && node.selected
-          ? { ...node, selected: false }
-          : node
-      )
-    );
-  }, [selectedNodeId, setFlowNodes]);
-
-  const arrangeVertical = useCallback(() => {
-    const nodeMeta = new Map(nodes.map((node) => [node.id, node]));
-    closeContextMenu();
-    setFlowNodes((prev) => {
-      let currentY = 0;
-      return prev.map((flowNode) => {
-        const meta = nodeMeta.get(flowNode.id);
-        const nodeHeight = reactFlowInstance?.getNode(flowNode.id)?.height ?? DEFAULT_NODE_HEIGHT;
-        const nextNode = {
-          ...flowNode,
-          position: {
-            x: meta?.fromOptionId ? FLOW_BRANCH_OFFSET_X : 0,
-            y: currentY,
-          },
-        };
-        currentY += nodeHeight + FLOW_VERTICAL_MARGIN;
-        return nextNode;
-      });
-    });
-    requestAnimationFrame(() => {
-      reactFlowInstance?.fitView({ padding: 0.3, duration: 300 });
-    });
-  }, [closeContextMenu, nodes, reactFlowInstance, setFlowNodes]);
-
-  const arrangeHorizontal = useCallback(() => {
-    const nodeMeta = new Map(nodes.map((node) => [node.id, node]));
-    closeContextMenu();
-    setFlowNodes((prev) => {
-      let currentX = 0;
-      return prev.map((flowNode) => {
-        const meta = nodeMeta.get(flowNode.id);
-        const measuredNode = reactFlowInstance?.getNode(flowNode.id);
-        const nodeWidth = measuredNode?.width ?? DEFAULT_NODE_WIDTH;
-        const nodeHeight = measuredNode?.height ?? DEFAULT_NODE_HEIGHT;
-        const nextNode = {
-          ...flowNode,
-          position: {
-            x: currentX,
-            y: meta?.fromOptionId ? nodeHeight + FLOW_VERTICAL_MARGIN : 0,
-          },
-        };
-        currentX += nodeWidth + FLOW_HORIZONTAL_MARGIN;
-        return nextNode;
-      });
-    });
-    requestAnimationFrame(() => {
-      reactFlowInstance?.fitView({ padding: 0.3, duration: 300 });
-    });
-  }, [closeContextMenu, nodes, reactFlowInstance, setFlowNodes]);
-
-  const setNodePosition = useCallback(
-    (nodeId: string, position: XYPosition) => {
-      setFlowNodes((prev) =>
-        prev.map((flowNode) => (flowNode.id === nodeId ? { ...flowNode, position } : flowNode))
-      );
-      requestAnimationFrame(() => {
-        const target = reactFlowInstance?.getNode(nodeId);
-        if (target) {
-          reactFlowInstance.fitView({ nodes: [target], padding: 0.4, duration: 300 });
-        }
-      });
-    },
-    [reactFlowInstance, setFlowNodes]
-  );
-
-  const handleNodeContextMenu = useCallback(
-    (event: MouseEvent, node: Node<PlotFlowNodeData>) => {
-      event.preventDefault();
-      if (!wrapperRef.current) return;
-      const bounds = wrapperRef.current.getBoundingClientRect();
-      setContextMenu({
-        nodeId: node.id,
-        x: event.clientX - bounds.left,
-        y: event.clientY - bounds.top,
-      });
-    },
-    []
-  );
-
-  useEffect(() => {
-    if (!reactFlowInstance || !onRegisterController) return;
-    const controller: FlowTimelineController = {
-      focusNode(nodeId: string) {
-        const targetNode = reactFlowInstance.getNode(nodeId);
-        if (targetNode) {
-          reactFlowInstance.fitView({ nodes: [targetNode], padding: 0.4, duration: 300 });
-        }
-      },
-      arrangeVertical,
-      arrangeHorizontal,
-      setNodePosition,
-    };
-    onRegisterController(controller);
-  }, [reactFlowInstance, onRegisterController, arrangeVertical, arrangeHorizontal, setNodePosition]);
-
-  const flowEdges = useMemo<Edge[]>(
-    () =>
-      nodes.reduce<Edge[]>((accumulator, plotNode, index) => {
-        if (index === 0) return accumulator;
-        const previous = nodes[index - 1];
-        const label = plotNode.fromOptionId ? `来自分支 ${plotNode.fromOptionId}` : undefined;
-        accumulator.push({
-          id: `${previous.id}-${plotNode.id}`,
-          source: previous.id,
-          target: plotNode.id,
-          type: 'smoothstep',
-          label,
-          labelBgPadding: [6, 2],
-          labelBgBorderRadius: 4,
-          labelStyle: { fontSize: 10 },
-        });
-        return accumulator;
-      }, []),
-    [nodes]
-  );
-
-  if (!nodes.length) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        暂无节点，使用右侧提示词生成或手动插入。
-      </div>
-    );
-  }
-
-  return (
-    <ReactFlowProvider>
-      <div ref={wrapperRef} className="relative h-full" style={{ minHeight: FLOW_CANVAS_MIN_HEIGHT }}>
-        <ReactFlow
-          nodes={flowNodes}
-          edges={flowEdges}
-          nodeTypes={nodeTypes}
-          fitView
-          fitViewOptions={{ padding: 0.3 }}
-          nodesConnectable={false}
-          panOnScroll
-          zoomOnScroll
-          zoomOnPinch
-          selectNodesOnDrag={false}
-          onNodesChange={onNodesChange}
-          onNodeClick={(_, node) => {
-            closeContextMenu();
-            if (onNodeFocus) onNodeFocus(node.id);
-          }}
-          onNodeContextMenu={handleNodeContextMenu}
-          onPaneClick={closeContextMenu}
-          onPaneContextMenu={(event) => {
-            event.preventDefault();
-            closeContextMenu();
-          }}
-          onMoveStart={closeContextMenu}
-          onDragOver={(event) => {
-            event.preventDefault();
-            event.dataTransfer.dropEffect = 'move';
-          }}
-          onDrop={(event) => {
-            event.preventDefault();
-            closeContextMenu();
-            if (!reactFlowInstance || !wrapperRef.current || !onNodeDrop) return;
-            const raw = event.dataTransfer.getData(FLOW_NODE_DRAG_TYPE);
-            if (!raw) return;
-            let parsed: { kind?: PlotNodeKind };
-            try {
-              parsed = JSON.parse(raw);
-            } catch {
-              return;
-            }
-            if (parsed.kind !== 'dialogue' && parsed.kind !== 'narration') return;
-            const bounds = wrapperRef.current.getBoundingClientRect();
-            const position = reactFlowInstance.project({
-              x: event.clientX - bounds.left,
-              y: event.clientY - bounds.top,
-            });
-            onNodeDrop(parsed.kind, position);
-          }}
-          onInit={setReactFlowInstance}
-          className="[&_.react-flow__attribution]:hidden"
-        >
-          <Background gap={24} color="#E5E7EB" />
-          <Controls showInteractive={false} />
-        </ReactFlow>
-        {contextMenu ? (
-          <div
-            className="absolute z-50 min-w-[160px] rounded-md border border-border bg-popover p-1 text-sm shadow-lg"
-            style={{ top: contextMenu.y, left: contextMenu.x }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <button
-              type="button"
-              className="flex w-full items-center gap-2 rounded px-3 py-2 text-left hover:bg-muted"
-              onClick={() => {
-                closeContextMenu();
-                void onCloneNode?.(contextMenu.nodeId);
-              }}
-            >
-              克隆节点
-            </button>
-            <button
-              type="button"
-              className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-destructive hover:bg-destructive/10"
-              onClick={() => {
-                closeContextMenu();
-                void onDeleteNode?.(contextMenu.nodeId);
-              }}
-            >
-              删除节点
-            </button>
-          </div>
-        ) : null}
-      </div>
-    </ReactFlowProvider>
-  );
-}
-
-function CharacterMessageNode({ data, selected }: NodeProps<PlotFlowNodeData>) {
-  const { plotNode, order } = data;
-  return (
-    <div className="relative w-[360px]">
-      <NodeToolbar isVisible={selected} position={Position.Top} className="flex items-center gap-2">
-        <Button
-          size="icon"
-          variant="outline"
-          className="h-7 w-7"
-          onClick={(event) => {
-            event.stopPropagation();
-            data.onEdit?.(data.plotNode);
-          }}
-        >
-          <Pencil className="h-3 w-3" />
-        </Button>
-      </NodeToolbar>
-      <Handle
-        type="target"
-        position={Position.Top}
-        className="!h-2 !w-2 !rounded-full !border-none !bg-primary/70"
-      />
-      <Card
-        className={cn(
-          'border border-primary/40 bg-primary/5 p-4 shadow-sm transition-shadow hover:shadow-md',
-          selected ? 'border-primary ring-2 ring-primary/40 shadow-md' : ''
-        )}
-      >
-        <div className="mb-2 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
-              {order}
-            </span>
-            <span className="flex items-center gap-2 text-sm font-semibold text-primary">
-              <MessageCircle className="h-4 w-4" />
-              {plotNode.character || '未命名角色'}
-            </span>
-          </div>
-          {plotNode.action ? <span className="text-xs text-muted-foreground">{plotNode.action}</span> : null}
-        </div>
-        <p className="text-sm leading-relaxed text-foreground">{plotNode.text}</p>
-        {plotNode.fromOptionId ? (
-          <div className="mt-2 text-xs text-muted-foreground">来自分支 {plotNode.fromOptionId}</div>
-        ) : null}
-      </Card>
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        className="!h-2 !w-2 !rounded-full !border-none !bg-primary/70"
-      />
-    </div>
-  );
-}
-
-function NarrationNode({ data, selected }: NodeProps<PlotFlowNodeData>) {
-  const { plotNode, order } = data;
-  return (
-    <div className="relative w-[320px]">
-      <NodeToolbar isVisible={selected} position={Position.Top} className="flex items-center gap-2">
-        <Button
-          size="icon"
-          variant="outline"
-          className="h-7 w-7"
-          onClick={(event) => {
-            event.stopPropagation();
-            data.onEdit?.(data.plotNode);
-          }}
-        >
-          <Pencil className="h-3 w-3" />
-        </Button>
-      </NodeToolbar>
-      <Handle
-        type="target"
-        position={Position.Top}
-        className="!h-2 !w-2 !rounded-full !border-none !bg-muted-foreground/70"
-      />
-      <Card
-        className={cn(
-          'border border-muted bg-muted/20 p-4 shadow-sm transition-shadow hover:shadow-md',
-          selected ? 'border-primary/50 ring-2 ring-primary/30 shadow-md' : ''
-        )}
-      >
-        <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-muted-foreground">
-          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-foreground">
-            {order}
-          </span>
-          <AlignLeft className="h-4 w-4" />
-          <span>旁白</span>
-        </div>
-        <p className="text-sm leading-relaxed text-muted-foreground">{plotNode.text}</p>
-        {plotNode.fromOptionId ? (
-          <div className="mt-2 text-xs text-muted-foreground/80">来自分支 {plotNode.fromOptionId}</div>
-        ) : null}
-      </Card>
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        className="!h-2 !w-2 !rounded-full !border-none !bg-muted-foreground/70"
-      />
-    </div>
-  );
-}
-
-function SegmentPreview({
-  segment,
-  onInsertChoice,
-}: {
-  segment: FlowgramSegment;
-  onInsertChoice: (option: FlowgramChoicesSegment['options'][0]) => void;
-}) {
-  if (segment.type === 'meta') {
-    return (
-      <div className="space-y-1 rounded border border-dashed border-primary/60 bg-primary/5 p-3">
-        <div className="text-xs font-semibold text-primary">剧情设定更新</div>
-        <div className="text-sm font-medium">{segment.title}</div>
-        <div className="text-xs text-muted-foreground">
-          {[segment.genre, segment.style, segment.pov].filter(Boolean).join(' · ')}
-        </div>
-        {segment.tags?.length ? (
-          <div className="flex flex-wrap gap-1 text-xs text-muted-foreground">
-            {segment.tags.map((tag) => (
-              <span key={tag} className="rounded bg-muted px-2 py-0.5">
-                {tag}
-              </span>
-            ))}
-          </div>
-        ) : null}
-      </div>
-    );
-  }
-
-  if (segment.type === 'narration') {
-    return (
-      <div className="rounded border border-muted bg-muted/20 p-3 text-sm">
-        <div className="mb-1 flex items-center gap-2 text-xs font-semibold text-muted-foreground">
-          <AlignLeft className="h-3 w-3" />
-          旁白
-        </div>
-        {segment.text}
-      </div>
-    );
-  }
-
-  if (segment.type === 'dialogue') {
-    return (
-      <div className="rounded border border-muted/80 bg-background p-3 text-sm">
-        <div className="mb-1 flex items-center justify-between text-xs font-semibold text-muted-foreground">
-          <span className="flex items-center gap-2">
-            <MessageCircle className="h-3 w-3" />
-            {segment.character}
-          </span>
-          {segment.action ? <span>{segment.action}</span> : null}
-        </div>
-        {segment.message}
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-2 rounded border border-primary/40 bg-primary/5 p-3 text-sm">
-      <div className="text-xs font-semibold text-primary">可选分支 · 第 {segment.step} 步</div>
-      <div className="space-y-2">
-        {segment.options.map((option) => (
-          <Card key={option.id} className="border border-primary/30 p-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="font-medium">{option.summary}</div>
-                <div className="text-xs text-muted-foreground">{option.hint}</div>
-                {option.keywords?.length ? (
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    关键词：{option.keywords.join('、')}
-                  </div>
-                ) : null}
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => onInsertChoice(option)}
-              >
-                插入分支
-              </Button>
-            </div>
-          </Card>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function NodeEditorDialog({
-  open,
-  mode,
-  kind,
-  initialNode,
-  submitting,
-  error,
-  onClose,
-  onSubmit,
-}: {
-  open: boolean;
-  mode: 'create' | 'edit';
-  kind: PlotNodeKind;
-  initialNode?: PlotNode;
-  submitting: boolean;
-  error?: string | null;
-  onClose: () => void;
-  onSubmit: (values: NodeEditorFormValues) => void;
-}) {
-  const [character, setCharacter] = useState('');
-  const [action, setAction] = useState('');
-  const [text, setText] = useState('');
-
-  useEffect(() => {
-    if (!open) return;
-    setCharacter(initialNode?.character ?? '');
-    setAction(initialNode?.action ?? '');
-    setText(initialNode?.text ?? '');
-  }, [open, initialNode]);
-
-  const handleSubmit = useCallback(
-    (event: FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-      onSubmit({
-        character: character.trim(),
-        action: action.trim(),
-        text: text.trim(),
-      });
-    },
-    [action, character, onSubmit, text]
-  );
-
-  const isDialogue = kind === 'dialogue';
-  const isTextEmpty = !text.trim();
-
-  return (
-    <Dialog open={open} onOpenChange={(value) => (!value ? onClose() : undefined)}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>
-            {mode === 'create'
-              ? `新建${isDialogue ? '角色消息' : '旁白'}`
-              : `编辑${isDialogue ? '角色消息' : '旁白'}`}
-          </DialogTitle>
-          <DialogDescription>
-            {mode === 'create'
-              ? '填写节点内容并保存到当前工作流。'
-              : '更新节点内容并保存修改。'}
-          </DialogDescription>
-        </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {isDialogue ? (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1">
-                <Label htmlFor="node-editor-character">角色名称</Label>
-                <Input
-                  id="node-editor-character"
-                  value={character}
-                  onChange={(event) => setCharacter(event.target.value)}
-                  placeholder="例如：林安"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="node-editor-action">语气 / 动作</Label>
-                <Input
-                  id="node-editor-action"
-                  value={action}
-                  onChange={(event) => setAction(event.target.value)}
-                  placeholder="例如：低声说"
-                />
-              </div>
-            </div>
-          ) : null}
-          <div className="space-y-1">
-            <Label htmlFor="node-editor-text">节点内容</Label>
-            <Textarea
-              id="node-editor-text"
-              value={text}
-              onChange={(event) => setText(event.target.value)}
-              rows={6}
-              placeholder={isDialogue ? '输入角色对话内容…' : '输入旁白内容…'}
-            />
-          </div>
-          {error ? (
-            <div className="rounded border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {error}
-            </div>
-          ) : null}
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
-              取消
-            </Button>
-            <Button type="submit" disabled={submitting || isTextEmpty}>
-              {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              {mode === 'create' ? '创建节点' : '保存修改'}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
   );
 }

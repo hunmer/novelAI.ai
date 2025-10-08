@@ -29,6 +29,7 @@ type GenerateBody = {
   promptId?: string | null;
   wordBudget?: number;
   autoInsert?: boolean;
+  sourceNodeId?: string | null;
 };
 
 const WORD_BUDGET_MIN = 100;
@@ -126,9 +127,12 @@ function applySegments(
   workflow: PlotWorkflowState,
   segments: FlowgramSegment[],
   prompt: string,
-  promptId?: string | null
+  promptId?: string | null,
+  sourceNodeId?: string | null
 ) {
-  const nodes = nodesFromSegments(segments);
+  const nodes = nodesFromSegments(segments).map((node) =>
+    sourceNodeId && !node.fromOptionId ? { ...node, fromOptionId: sourceNodeId } : node
+  );
   const choices = segments.filter(
     (segment): segment is FlowgramChoicesSegment => segment.type === 'choices'
   );
@@ -139,7 +143,6 @@ function applySegments(
   const metadataPatch: Partial<PlotMetadata> = {
     lastPrompt: prompt,
     promptId: promptId ?? metadata.promptId ?? null,
-    lastSegments: segments,
   };
 
   if (metaSegment) {
@@ -151,6 +154,7 @@ function applySegments(
   }
 
   const nextMetadata = mergeMetadata(metadata, metadataPatch);
+  nextMetadata.lastSegments = undefined;
   const nextWorkflow: PlotWorkflowState = {
     nodes: [...workflow.nodes, ...nodes],
   };
@@ -173,6 +177,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       return NextResponse.json({ error: 'prompt is required' }, { status: 400 });
     }
 
+    const sourceNodeId = typeof body.sourceNodeId === 'string' ? body.sourceNodeId : null;
     const autoInsert = body.autoInsert ?? true;
     const rawWordBudget = typeof body.wordBudget === 'number' ? body.wordBudget : 800;
     const wordBudget = Math.min(
@@ -237,7 +242,8 @@ export async function POST(req: NextRequest, { params }: Params) {
       workflow,
       segments,
       promptWithBudget,
-      body.promptId
+      body.promptId,
+      sourceNodeId
     );
 
     const workflowToPersist = autoInsert ? nextWorkflow : workflow;

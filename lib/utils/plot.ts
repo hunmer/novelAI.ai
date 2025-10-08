@@ -1,9 +1,4 @@
-import type {
-  FlowgramSegment,
-  PlotMetadata,
-  PlotNode,
-  PlotWorkflowState,
-} from '@/lib/types/plot';
+import type { FlowgramSegment, PlotMetadata, PlotNode, PlotNodeKind, PlotWorkflowState } from '@/lib/types/plot';
 
 function generateNodeId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -28,10 +23,18 @@ function sanitizeNodes(nodes: unknown): PlotNode[] {
   return nodes
     .filter((node): node is Record<string, unknown> => typeof node === 'object' && node !== null)
     .map((node) => {
-      const kind = node.kind === 'dialogue' ? 'dialogue' : 'narration';
+      const rawKind = typeof node.kind === 'string' ? node.kind : 'narration';
+      const kind: PlotNodeKind =
+        rawKind === 'dialogue' ? 'dialogue' : rawKind === 'branch' ? 'branch' : 'narration';
       const text = typeof node.text === 'string' ? node.text : '';
       const character = typeof node.character === 'string' ? node.character : undefined;
       const action = typeof node.action === 'string' ? node.action : undefined;
+      const prompt =
+        typeof node.prompt === 'string'
+          ? node.prompt
+          : node.prompt === null
+          ? null
+          : undefined;
       const fromOptionId =
         typeof node.fromOptionId === 'string' || node.fromOptionId === null
           ? node.fromOptionId
@@ -45,6 +48,7 @@ function sanitizeNodes(nodes: unknown): PlotNode[] {
         character,
         action,
         fromOptionId: fromOptionId ?? null,
+        prompt: prompt ?? null,
         createdAt,
       } satisfies PlotNode;
     });
@@ -99,6 +103,7 @@ export function createPlotNode(partial: Pick<PlotNode, 'kind' | 'text'> & Partia
     character: partial.character,
     action: partial.action,
     fromOptionId: partial.fromOptionId ?? null,
+    prompt: partial.prompt ?? null,
     createdAt: partial.createdAt ?? nowIso,
   } satisfies PlotNode;
 }

@@ -40,7 +40,7 @@ export type FlowgramSegment =
   | FlowgramDialogueSegment
   | FlowgramChoicesSegment;
 
-export type PlotNodeKind = 'narration' | 'dialogue';
+export type PlotNodeKind = 'narration' | 'dialogue' | 'branch';
 
 export interface PlotNode {
   id: string;
@@ -61,6 +61,10 @@ export interface PlotNode {
    * 来源于哪一个选项分支，便于在画布中展示。
    */
   fromOptionId?: string | null;
+  /**
+   * 当 kind === 'branch' 时用于记录分支提示词。
+   */
+  prompt?: string | null;
   createdAt: string;
 }
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
-import type { FlowgramSegment, PlotMetadata, PlotRecord, PlotWorkflowState } from '@/lib/types/plot';
+import type { FlowgramSegment, PlotMetadata, PlotNodeKind, PlotRecord, PlotWorkflowState } from '@/lib/types/plot';
 import {
   createPlotNode,
   createEmptyPlotWorkflow,
@@ -50,16 +50,27 @@ function buildNodes(input: unknown) {
     .map((raw) => {
       if (!raw || typeof raw !== 'object') return null;
       const candidate = raw as Record<string, unknown>;
-      const kind = candidate.kind === 'dialogue' ? 'dialogue' : 'narration';
+      const kind: PlotNodeKind =
+        candidate.kind === 'dialogue'
+          ? 'dialogue'
+          : candidate.kind === 'branch'
+          ? 'branch'
+          : 'narration';
       const rawText = candidate.text;
       const text = typeof rawText === 'string' ? rawText.trim() : '';
-      if (!text) return null;
+      if (kind !== 'branch' && !text) return null;
       const id = typeof candidate.id === 'string' && candidate.id.trim() ? candidate.id : undefined;
       const character = typeof candidate.character === 'string' ? candidate.character : undefined;
       const action = typeof candidate.action === 'string' ? candidate.action : undefined;
       const fromOptionId =
         typeof candidate.fromOptionId === 'string' || candidate.fromOptionId === null
           ? (candidate.fromOptionId as string | null)
+          : undefined;
+      const prompt =
+        typeof candidate.prompt === 'string'
+          ? candidate.prompt
+          : candidate.prompt === null
+          ? null
           : undefined;
       const createdAt =
         typeof candidate.createdAt === 'string' && candidate.createdAt.trim()
@@ -72,6 +83,7 @@ function buildNodes(input: unknown) {
         character,
         action,
         fromOptionId,
+        prompt,
         createdAt,
       });
     })
