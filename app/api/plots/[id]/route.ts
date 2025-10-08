@@ -61,6 +61,10 @@ function buildNodes(input: unknown) {
         typeof candidate.fromOptionId === 'string' || candidate.fromOptionId === null
           ? (candidate.fromOptionId as string | null)
           : undefined;
+      const createdAt =
+        typeof candidate.createdAt === 'string' && candidate.createdAt.trim()
+          ? candidate.createdAt
+          : undefined;
       return createPlotNode({
         id,
         kind,
@@ -68,6 +72,7 @@ function buildNodes(input: unknown) {
         character,
         action,
         fromOptionId,
+        createdAt,
       });
     })
     .filter((node): node is ReturnType<typeof createPlotNode> => node !== null);

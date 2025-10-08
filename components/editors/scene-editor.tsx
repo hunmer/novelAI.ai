@@ -37,9 +37,6 @@ export function SceneEditor({ projectId, worldContext }: SceneEditorProps) {
   const [streamingContent, setStreamingContent] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
 
-  useEffect(() => {
-    loadScenes();
-  }, [projectId, loadScenes]);
 
   const loadScenes = useCallback(async () => {
     try {
@@ -50,6 +47,11 @@ export function SceneEditor({ projectId, worldContext }: SceneEditorProps) {
       console.error('Failed to load scenes:', error);
     }
   }, [projectId]);
+
+
+  useEffect(() => {
+    loadScenes();
+  }, [projectId, loadScenes]);
 
   const handleGenerate = async () => {
     if (!keywords) return;
