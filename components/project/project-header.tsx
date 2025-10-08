@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowLeft, Users, Settings, MessageSquare } from 'lucide-react';
+import { ArrowLeft, Users, Settings, MessageSquare, Edit2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useRouter } from 'next/navigation';
@@ -14,10 +14,13 @@ import {
 } from '@/components/ui/dialog';
 import { ModelProviderSettings } from '@/components/settings/model-provider-settings';
 import { PromptManagement } from '@/components/prompts/prompt-management';
+import {
+  CreateProjectDialog,
+  type ProjectDialogProject,
+} from '@/components/project/create-project-dialog';
 
 interface ProjectHeaderProps {
-  projectId: string;
-  projectName: string;
+  project: ProjectDialogProject;
   onlineUsers: OnlineUser[];
   isConnected: boolean;
 }
@@ -28,7 +31,7 @@ interface ProjectHeaderProps {
  * 中间：项目名称
  * 右上角：模型管理、提示词管理、在线用户显示
  */
-export function ProjectHeader({ projectId, projectName, onlineUsers, isConnected }: ProjectHeaderProps) {
+export function ProjectHeader({ project, onlineUsers, isConnected }: ProjectHeaderProps) {
   const router = useRouter();
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const [promptDialogOpen, setPromptDialogOpen] = useState(false);
@@ -46,7 +49,22 @@ export function ProjectHeader({ projectId, projectName, onlineUsers, isConnected
             <ArrowLeft className="h-4 w-4" />
             返回项目列表
           </Button>
-          <h1 className="text-xl font-semibold">{projectName}</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-semibold">{project.name}</h1>
+            <CreateProjectDialog
+              project={project}
+              trigger={
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                >
+                  <Edit2 className="h-4 w-4" />
+                  <span className="sr-only">编辑项目</span>
+                </Button>
+              }
+            />
+          </div>
         </div>
 
         <div className="flex items-center gap-3">
@@ -114,7 +132,7 @@ export function ProjectHeader({ projectId, projectName, onlineUsers, isConnected
           <DialogHeader>
             <DialogTitle>提示词管理</DialogTitle>
           </DialogHeader>
-          <PromptManagement projectId={projectId} />
+          <PromptManagement projectId={project.id} />
         </DialogContent>
       </Dialog>
     </header>

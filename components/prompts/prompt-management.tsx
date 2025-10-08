@@ -9,17 +9,20 @@ interface PromptManagementProps {
   projectId: string;
 }
 
+type PromptTab = 'world' | 'character' | 'scene' | 'dialog' | 'portrait';
+
 export function PromptManagement({ projectId }: PromptManagementProps) {
-  const [activeTab, setActiveTab] = useState<'world' | 'character' | 'scene' | 'dialog'>('world');
+  const [activeTab, setActiveTab] = useState<PromptTab>('world');
 
   return (
     <div className="space-y-4">
-      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'world' | 'character' | 'scene' | 'dialog')}>
-        <TabsList className="grid w-full grid-cols-4">
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as PromptTab)}>
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="world">世界观</TabsTrigger>
           <TabsTrigger value="character">角色</TabsTrigger>
           <TabsTrigger value="scene">场景</TabsTrigger>
           <TabsTrigger value="dialog">对话</TabsTrigger>
+          <TabsTrigger value="portrait">立绘</TabsTrigger>
         </TabsList>
 
         <TabsContent value="world" className="mt-4">
@@ -43,6 +46,12 @@ export function PromptManagement({ projectId }: PromptManagementProps) {
         <TabsContent value="dialog" className="mt-4">
           <Card className="p-6">
             <PromptList projectId={projectId} type="dialog" />
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="portrait" className="mt-4">
+          <Card className="p-6">
+            <PromptList projectId={projectId} type="portrait" />
           </Card>
         </TabsContent>
       </Tabs>

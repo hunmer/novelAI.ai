@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,8 +13,15 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogDescription,
 } from '@/components/ui/dialog';
-import { Plus, Trash2, Check, X, Settings } from 'lucide-react';
+import { Plus, Trash2, Check, X, Settings, Table } from 'lucide-react';
+import {
+  PROVIDER_TYPE_OPTIONS,
+  ProviderType,
+  getProviderTypeLabel,
+  normalizeProviderType,
+} from '@/lib/ai/provider-types';
 
 type ModelCapability =
   | 'text'
@@ -44,6 +52,258 @@ const CAPABILITY_OPTIONS: { value: ModelCapability; label: string }[] = [
   { value: 'reasoning', label: CAPABILITY_LABELS.reasoning },
 ];
 
+type ProviderFeatureKey = 'imageInput' | 'objectGeneration' | 'toolUsage' | 'toolStreaming';
+
+type ProviderFeatures = Record<ProviderFeatureKey, boolean>;
+
+interface ProviderSupportRow {
+  providerName: string;
+  providerHref: string;
+  model: string;
+  features: ProviderFeatures;
+}
+
+const FEATURE_COLUMNS: Array<{ key: ProviderFeatureKey; label: string }> = [
+  { key: 'imageInput', label: 'Image Input' },
+  { key: 'objectGeneration', label: 'Object Generation' },
+  { key: 'toolUsage', label: 'Tool Usage' },
+  { key: 'toolStreaming', label: 'Tool Streaming' },
+];
+
+const FEATURE_PRESETS = {
+  all: {
+    imageInput: true,
+    objectGeneration: true,
+    toolUsage: true,
+    toolStreaming: true,
+  },
+  textToolsStream: {
+    imageInput: false,
+    objectGeneration: true,
+    toolUsage: true,
+    toolStreaming: true,
+  },
+  textTools: {
+    imageInput: false,
+    objectGeneration: true,
+    toolUsage: true,
+    toolStreaming: false,
+  },
+  imageOnly: {
+    imageInput: true,
+    objectGeneration: false,
+    toolUsage: false,
+    toolStreaming: false,
+  },
+  none: {
+    imageInput: false,
+    objectGeneration: false,
+    toolUsage: false,
+    toolStreaming: false,
+  },
+} as const satisfies Record<string, ProviderFeatures>;
+
+type FeaturePreset = keyof typeof FEATURE_PRESETS;
+
+function createProviderRows(
+  providerName: string,
+  providerHref: string,
+  models: Array<{ name: string; preset: FeaturePreset; overrides?: Partial<ProviderFeatures> }>
+): ProviderSupportRow[] {
+  return models.map(({ name, preset, overrides }) => ({
+    providerName,
+    providerHref,
+    model: name,
+    features: { ...FEATURE_PRESETS[preset], ...(overrides ?? {}) },
+  }));
+}
+
+const PROVIDER_SUPPORT_ROWS: ProviderSupportRow[] = [
+  ...createProviderRows('xAI Grok', '/providers/ai-sdk-providers/xai', [
+    { name: 'grok-4', preset: 'textToolsStream' },
+    { name: 'grok-3', preset: 'textToolsStream' },
+    { name: 'grok-3-fast', preset: 'textToolsStream' },
+    { name: 'grok-3-mini', preset: 'textToolsStream' },
+    { name: 'grok-3-mini-fast', preset: 'textToolsStream' },
+    { name: 'grok-2-1212', preset: 'textToolsStream' },
+    { name: 'grok-2-vision-1212', preset: 'all' },
+    { name: 'grok-beta', preset: 'textToolsStream' },
+    { name: 'grok-vision-beta', preset: 'imageOnly' },
+  ]),
+  ...createProviderRows('Vercel', '/providers/ai-sdk-providers/vercel', [
+    { name: 'v0-1.0-md', preset: 'all' },
+  ]),
+  ...createProviderRows('OpenAI', '/providers/ai-sdk-providers/openai', [
+    { name: 'gpt-5', preset: 'all' },
+    { name: 'gpt-5-mini', preset: 'all' },
+    { name: 'gpt-5-nano', preset: 'all' },
+    { name: 'gpt-5-codex', preset: 'all' },
+    { name: 'gpt-5-chat-latest', preset: 'all' },
+  ]),
+  ...createProviderRows('Anthropic', '/providers/ai-sdk-providers/anthropic', [
+    { name: 'claude-opus-4-1', preset: 'all' },
+    { name: 'claude-opus-4-0', preset: 'all' },
+    { name: 'claude-sonnet-4-0', preset: 'all' },
+    { name: 'claude-3-7-sonnet-latest', preset: 'all' },
+    { name: 'claude-3-5-haiku-latest', preset: 'all' },
+  ]),
+  ...createProviderRows('Groq', '/providers/ai-sdk-providers/groq', [
+    { name: 'meta-llama/llama-4-scout-17b-16e-instruct', preset: 'all' },
+    { name: 'deepseek-r1-distill-llama-70b', preset: 'textToolsStream' },
+    { name: 'llama-3.3-70b-versatile', preset: 'textToolsStream' },
+    { name: 'llama-3.1-8b-instant', preset: 'textToolsStream' },
+    { name: 'qwen-qwq-32b', preset: 'textToolsStream' },
+    { name: 'mixtral-8x7b-32768', preset: 'textToolsStream' },
+    { name: 'gemma2-9b-it', preset: 'textToolsStream' },
+    { name: 'moonshotai/kimi-k2-instruct', preset: 'textTools' },
+  ]),
+  ...createProviderRows('DeepInfra', '/providers/ai-sdk-providers/deepinfra', [
+    { name: 'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8', preset: 'imageOnly' },
+    { name: 'meta-llama/Llama-4-Scout-17B-16E-Instruct', preset: 'imageOnly' },
+    { name: 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo', preset: 'textTools' },
+    { name: 'meta-llama/Llama-3.3-70B-Instruct', preset: 'textTools' },
+    { name: 'deepseek-ai/DeepSeek-V3', preset: 'none' },
+    { name: 'deepseek-ai/DeepSeek-R1', preset: 'none' },
+    { name: 'deepseek-ai/DeepSeek-R1-Distill-Llama-70B', preset: 'none' },
+    { name: 'deepseek-ai/DeepSeek-R1-Turbo', preset: 'none' },
+  ]),
+  ...createProviderRows('Mistral', '/providers/ai-sdk-providers/mistral', [
+    { name: 'pixtral-large-latest', preset: 'all' },
+    { name: 'mistral-large-latest', preset: 'textToolsStream' },
+    { name: 'mistral-medium-latest', preset: 'textToolsStream' },
+    { name: 'mistral-medium-2505', preset: 'textToolsStream' },
+    { name: 'mistral-small-latest', preset: 'textToolsStream' },
+    { name: 'pixtral-12b-2409', preset: 'all' },
+  ]),
+  ...createProviderRows('Google Generative AI', '/providers/ai-sdk-providers/google-generative-ai', [
+    { name: 'gemini-2.0-flash-exp', preset: 'all' },
+    { name: 'gemini-1.5-flash', preset: 'all' },
+    { name: 'gemini-1.5-pro', preset: 'all' },
+  ]),
+  ...createProviderRows('Google Vertex', '/providers/ai-sdk-providers/google-vertex', [
+    { name: 'gemini-2.0-flash-exp', preset: 'all' },
+    { name: 'gemini-1.5-flash', preset: 'all' },
+    { name: 'gemini-1.5-pro', preset: 'all' },
+  ]),
+  ...createProviderRows('DeepSeek', '/providers/ai-sdk-providers/deepseek', [
+    { name: 'deepseek-chat', preset: 'textToolsStream' },
+    { name: 'deepseek-reasoner', preset: 'none' },
+  ]),
+  ...createProviderRows('Cerebras', '/providers/ai-sdk-providers/cerebras', [
+    { name: 'llama3.1-8b', preset: 'textToolsStream' },
+    { name: 'llama3.3-70b', preset: 'textToolsStream' },
+  ]),
+  ...createProviderRows('Fireworks', '/providers/ai-sdk-providers/fireworks', [
+    { name: 'kimi-k2-instruct', preset: 'textTools' },
+  ]),
+  ...createProviderRows('Baseten', '/providers/ai-sdk-providers/baseten', [
+    { name: 'openai/gpt-oss-120b', preset: 'textToolsStream' },
+    { name: 'Qwen/Qwen3-235B-A22B-Instruct-2507', preset: 'textToolsStream' },
+    { name: 'Qwen/Qwen3-Coder-480B-A35B-Instruct', preset: 'textToolsStream' },
+    { name: 'moonshotai/Kimi-K2-Instruct-0905', preset: 'textToolsStream' },
+    { name: 'deepseek-ai/DeepSeek-V3.1', preset: 'textToolsStream' },
+    { name: 'deepseek-ai/DeepSeek-R1-0528', preset: 'textToolsStream' },
+    { name: 'deepseek-ai/DeepSeek-V3-0324', preset: 'textToolsStream' },
+  ]),
+];
+
+function FeatureIcon({ active }: { active: boolean }) {
+  const Icon = active ? Check : X;
+  const classes = active ? 'h-4 w-4 text-emerald-500' : 'h-4 w-4 text-muted-foreground';
+
+  return (
+    <span className="inline-flex items-center justify-center">
+      <Icon className={classes} aria-hidden="true" />
+      <span className="sr-only">{active ? '支持' : '不支持'}</span>
+    </span>
+  );
+}
+
+function ProviderComparisonTable() {
+  return (
+    <div className="space-y-3">
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[720px] border-collapse text-sm">
+          <thead>
+            <tr className="border-b border-border text-left">
+              <th className="py-2 pr-3 font-medium">Provider</th>
+              <th className="py-2 pr-3 font-medium">Model</th>
+              {FEATURE_COLUMNS.map((column) => (
+                <th key={column.key} className="py-2 px-3 text-center font-medium">
+                  {column.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {PROVIDER_SUPPORT_ROWS.map((row) => (
+              <tr
+                key={`${row.providerName}-${row.model}`}
+                className="border-b border-border last:border-b-0"
+              >
+                <td className="py-2 pr-3 align-top">
+                  <Link
+                    href={row.providerHref}
+                    className="text-primary underline-offset-4 hover:underline"
+                  >
+                    {row.providerName}
+                  </Link>
+                </td>
+                <td className="py-2 pr-3 align-top">
+                  <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{row.model}</code>
+                </td>
+                {FEATURE_COLUMNS.map((column) => (
+                  <td key={column.key} className="py-2 px-3 text-center align-top">
+                    <FeatureIcon active={row.features[column.key]} />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="rounded-md border border-dashed border-muted-foreground/40 p-3 text-xs text-muted-foreground">
+        此表并非完整清单，更多模型可在提供商文档与社区维护的{' '}
+        <Link
+          href="/providers/ai-sdk-providers/community-providers"
+          className="text-primary underline-offset-4 hover:underline"
+        >
+          社区提供商
+        </Link>
+        {' '}页面中查看。
+      </div>
+    </div>
+  );
+}
+
+function ProviderComparisonModal({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="icon" aria-label="查看模型能力对比">
+          <Table className="h-4 w-4" aria-hidden="true" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-5xl">
+        <DialogHeader>
+          <DialogTitle>AI SDK Providers</DialogTitle>
+          <DialogDescription>
+            AI SDK 提供官方与社区模型服务商支持，以下表格概览主流模型的能力覆盖，便于快速对比与选择。
+          </DialogDescription>
+        </DialogHeader>
+        <ProviderComparisonTable />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 interface ProviderModelForm {
   name: string;
   label?: string;
@@ -55,13 +315,22 @@ interface ProviderModelForm {
 interface ModelProvider {
   id: string;
   name: string;
-  type: 'openai' | 'anthropic' | 'custom';
+  type: ProviderType;
   apiKey: string;
   baseUrl?: string;
   models: ProviderModelForm[];
   isDefault: boolean;
   isActive: boolean;
   metadata?: Record<string, any>;
+}
+
+interface ProviderFormState {
+  name: string;
+  type: ProviderType;
+  apiKey: string;
+  baseUrl: string;
+  models: ProviderModelForm[];
+  isDefault: boolean;
 }
 
 const PRESET_MODEL_LIBRARY: Record<string, ProviderModelForm[]> = {
@@ -113,6 +382,17 @@ function cloneModels(models: ProviderModelForm[]): ProviderModelForm[] {
   }));
 }
 
+function createEmptyFormState(): ProviderFormState {
+  return {
+    name: '',
+    type: 'openai',
+    apiKey: '',
+    baseUrl: '',
+    models: [],
+    isDefault: false,
+  };
+}
+
 function getPresetKey(name: string): string | undefined {
   const key = name.trim().toLowerCase();
   if (!key) return undefined;
@@ -124,15 +404,9 @@ export function ModelProviderSettings() {
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProvider, setEditingProvider] = useState<ModelProvider | null>(null);
+  const [comparisonOpen, setComparisonOpen] = useState(false);
 
-  const [formData, setFormData] = useState({
-    name: '',
-    type: 'openai' as 'openai' | 'anthropic' | 'custom',
-    apiKey: '',
-    baseUrl: '',
-    models: [] as ProviderModelForm[],
-    isDefault: false,
-  });
+  const [formData, setFormData] = useState<ProviderFormState>(() => createEmptyFormState());
 
   useEffect(() => {
     fetchProviders();
@@ -145,7 +419,7 @@ export function ModelProviderSettings() {
       const nextProviders: ModelProvider[] = (data.providers || []).map((provider: any) => ({
         id: provider.id,
         name: provider.name,
-        type: provider.type,
+        type: normalizeProviderType(provider.type),
         apiKey: provider.apiKey,
         baseUrl: provider.baseUrl || '',
         models: Array.isArray(provider.models)
@@ -324,14 +598,7 @@ export function ModelProviderSettings() {
   };
 
   const resetForm = () => {
-    setFormData({
-      name: '',
-      type: 'openai',
-      apiKey: '',
-      baseUrl: '',
-      models: [],
-      isDefault: false,
-    });
+    setFormData(createEmptyFormState());
     setEditingProvider(null);
   };
 
@@ -442,7 +709,13 @@ export function ModelProviderSettings() {
           </DialogTrigger>
           <DialogContent className="max-w-3xl">
             <DialogHeader>
-              <DialogTitle>{editingProvider ? '编辑' : '添加'}模型提供商</DialogTitle>
+              <div className="flex items-center justify-between">
+                <DialogTitle>{editingProvider ? '编辑' : '添加'}模型提供商</DialogTitle>
+                <ProviderComparisonModal
+                  open={comparisonOpen}
+                  onOpenChange={setComparisonOpen}
+                />
+              </div>
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid gap-3 md:grid-cols-2">
@@ -464,15 +737,17 @@ export function ModelProviderSettings() {
                     onChange={(e) =>
                       setFormData({
                         ...formData,
-                        type: e.target.value as 'openai' | 'anthropic' | 'custom',
+                        type: normalizeProviderType(e.target.value),
                       })
                     }
                     className="w-full rounded border p-2"
                     required
                   >
-                    <option value="openai">OpenAI</option>
-                    <option value="anthropic">Anthropic</option>
-                    <option value="custom">自定义(OpenAI兼容)</option>
+                    {PROVIDER_TYPE_OPTIONS.map(({ value, label }) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div>
@@ -651,7 +926,7 @@ export function ModelProviderSettings() {
                   <Badge variant={provider.isActive ? 'outline' : 'secondary'}>
                     {provider.isActive ? '已启用' : '已禁用'}
                   </Badge>
-                  <Badge variant="outline">{provider.type}</Badge>
+                  <Badge variant="outline">{getProviderTypeLabel(provider.type)}</Badge>
                 </div>
                 {provider.baseUrl && (
                   <p className="text-xs text-muted-foreground">端点：{provider.baseUrl}</p>
@@ -775,6 +1050,7 @@ export function ModelProviderSettings() {
           </div>
         )}
       </div>
+
     </div>
   );
 }

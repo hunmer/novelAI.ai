@@ -11,6 +11,9 @@ model Project {
   id          String   @id @default(cuid())
   name        String
   description String?
+  author      String?
+  tags        String?
+  coverImage  String?
   meta        String   @default("{}")
   world       String?  @default("{}")
   createdAt   DateTime @default(now())

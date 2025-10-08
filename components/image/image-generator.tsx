@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import imageCompression from 'browser-image-compression';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -54,6 +54,16 @@ interface GalleryImage extends GeneratedImage {
   isSynthetic?: boolean;
 }
 
+interface PortraitPreset {
+  id: string;
+  name: string;
+  user?: string;
+  content?: string;
+  isDefault?: boolean;
+}
+
+const PORTRAIT_PRESET_CUSTOM = '__manual__';
+
 interface ImageGeneratorProps {
   projectId?: string;
   sceneId?: string;
@@ -89,10 +99,74 @@ export function ImageGenerator({
   const [showHistory, setShowHistory] = useState(true);
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
   const [activeSlide, setActiveSlide] = useState(0);
+  const [portraitPresets, setPortraitPresets] = useState<PortraitPreset[]>([]);
+  const [selectedPortraitPresetId, setSelectedPortraitPresetId] = useState<string>(
+    PORTRAIT_PRESET_CUSTOM
+  );
+  const hasAutoFilledPortrait = useRef(false);
 
   useEffect(() => {
     setPrompt(initialPrompt);
   }, [initialPrompt]);
+
+  useEffect(() => {
+    const fetchPortraitPresets = async () => {
+      try {
+        const params = new URLSearchParams({ type: 'portrait' });
+        if (projectId) {
+          params.set('projectId', projectId);
+        }
+        const res = await fetch(`/api/prompts?${params.toString()}`);
+        if (!res.ok) {
+          throw new Error('failed to load portrait presets');
+        }
+        const data = await res.json();
+        const presets: PortraitPreset[] = Array.isArray(data.prompts)
+          ? data.prompts.map((item: any) => ({
+              id: item.id,
+              name: item.name,
+              user: typeof item.user === 'string' ? item.user : item.content ?? '',
+              content: typeof item.content === 'string' ? item.content : undefined,
+              isDefault: Boolean(item.isDefault),
+            }))
+          : [];
+        setPortraitPresets(presets);
+        setSelectedPortraitPresetId((current) => {
+          if (current === PORTRAIT_PRESET_CUSTOM) {
+            return PORTRAIT_PRESET_CUSTOM;
+          }
+          return presets.some((preset) => preset.id === current)
+            ? current
+            : PORTRAIT_PRESET_CUSTOM;
+        });
+        hasAutoFilledPortrait.current = false;
+        if (!presets.length) {
+          setSelectedPortraitPresetId(PORTRAIT_PRESET_CUSTOM);
+        }
+      } catch (error) {
+        console.error('获取立绘预设失败:', error);
+      }
+    };
+
+    fetchPortraitPresets();
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!portraitPresets.length) return;
+    if (prompt.trim()) return;
+    if (hasAutoFilledPortrait.current) return;
+    const defaultPreset =
+      portraitPresets.find((preset) => preset.isDefault) ?? portraitPresets[0];
+    if (!defaultPreset) return;
+    setSelectedPortraitPresetId(defaultPreset.id);
+    const nextPrompt = defaultPreset.user && defaultPreset.user.trim()
+      ? defaultPreset.user
+      : defaultPreset.content ?? '';
+    if (nextPrompt) {
+      setPrompt(nextPrompt);
+    }
+    hasAutoFilledPortrait.current = true;
+  }, [portraitPresets, prompt]);
 
   // 加载图片生成模型提供商
   useEffect(() => {
@@ -288,18 +362,75 @@ export function ImageGenerator({
     }
   }, [activeSlide, displayedImages, fetchImageHistory]);
 
+  const handlePortraitPresetChange = useCallback(
+    (value: string) => {
+      setSelectedPortraitPresetId(value);
+      hasAutoFilledPortrait.current = true;
+      if (value === PORTRAIT_PRESET_CUSTOM) {
+        return;
+      }
+      const preset = portraitPresets.find((item) => item.id === value);
+      if (!preset) return;
+      const nextPrompt = preset.user && preset.user.trim()
+        ? preset.user
+        : preset.content ?? '';
+      setPrompt(nextPrompt);
+    },
+    [portraitPresets]
+  );
+
   const handleGenerate = async () => {
-    if (!prompt || !selectedProviderId) return;
+    const trimmedPrompt = prompt.trim();
+    if (!trimmedPrompt || !selectedProviderId) return;
 
     setIsGenerating(true);
     setGeneratedImageUrl('');
 
     try {
+      let imagePrompt = trimmedPrompt;
+
+      if (portraitPresets.length && selectedPortraitPresetId !== PORTRAIT_PRESET_CUSTOM) {
+        const keywordResponse = await fetch('/api/ai/portrait-keywords', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: trimmedPrompt }),
+        });
+
+        const keywordData = await keywordResponse.json();
+
+        if (!keywordResponse.ok || !keywordData.success) {
+          throw new Error(keywordData.error || '立绘关键词生成失败');
+        }
+
+        const positive = keywordData.result?.positive ?? {};
+        const positiveParts = [
+          positive.appearance,
+          positive.style,
+          positive.lighting,
+          positive.composition,
+          positive.details,
+        ]
+          .map((part: unknown) => (typeof part === 'string' ? part.trim() : ''))
+          .filter(Boolean);
+
+        if (positiveParts.length) {
+          imagePrompt = positiveParts.join(', ');
+        }
+
+        const negative = Array.isArray(keywordData.result?.negative)
+          ? keywordData.result.negative.filter((item: unknown) => typeof item === 'string' && item.trim())
+          : [];
+
+        if (negative.length) {
+          imagePrompt = `${imagePrompt}\nNegative prompt: ${negative.join(', ')}`;
+        }
+      }
+
       const res = await fetch('/api/ai/image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt,
+          prompt: imagePrompt,
           providerId: selectedProviderId,
           model: selectedModel,
           projectId,
@@ -388,10 +519,36 @@ export function ImageGenerator({
 
           <div>
             <Label htmlFor="prompt">绘画提示词</Label>
+            {portraitPresets.length > 0 && (
+              <div className="mb-2">
+                <Label htmlFor="portraitPreset" className="text-sm text-muted-foreground">
+                  立绘预设
+                </Label>
+                <Select value={selectedPortraitPresetId} onValueChange={handlePortraitPresetChange}>
+                  <SelectTrigger id="portraitPreset">
+                    <SelectValue placeholder="选择立绘关键词预设" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={PORTRAIT_PRESET_CUSTOM}>自定义输入</SelectItem>
+                    {portraitPresets.map((preset) => (
+                      <SelectItem key={preset.id} value={preset.id}>
+                        {preset.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <Textarea
               id="prompt"
               value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
+              onChange={(e) => {
+                setPrompt(e.target.value);
+                if (selectedPortraitPresetId !== PORTRAIT_PRESET_CUSTOM) {
+                  setSelectedPortraitPresetId(PORTRAIT_PRESET_CUSTOM);
+                }
+                hasAutoFilledPortrait.current = true;
+              }}
               placeholder="详细描述你想要生成的图片，例如：A futuristic cyberpunk city at night, neon lights, rain-soaked streets..."
               rows={4}
             />

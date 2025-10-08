@@ -129,6 +129,9 @@ export class AIClient {
       await logger.debug(`AI 生成请求: ${type}`, 'ai-client', {
         type,
         model: model.modelId,
+        provider: model.providerId,
+        system: systemPrompt,
+        input: finalPrompt,
         temperature: AI_CONFIG.defaultTemperature,
         maxTokens: AI_CONFIG.maxTokens,
       });

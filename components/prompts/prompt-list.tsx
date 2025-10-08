@@ -16,13 +16,15 @@ import { Plus, Trash2, Pencil, Sparkles, RotateCcw } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { PROMPT_TEMPLATES } from '@/lib/ai/prompts';
 
+type PromptCategory = 'world' | 'character' | 'scene' | 'dialog' | 'portrait';
+
 interface Prompt {
   id: string;
   name: string;
   content?: string;
   system?: string;
   user?: string;
-  type: 'world' | 'character' | 'scene' | 'dialog';
+  type: PromptCategory;
   projectId: string;
   createdAt: string;
   updatedAt: string;
@@ -31,7 +33,7 @@ interface Prompt {
 
 interface PromptListProps {
   projectId: string;
-  type: 'world' | 'character' | 'scene' | 'dialog';
+  type: PromptCategory;
 }
 
 export function PromptList({ projectId, type }: PromptListProps) {
@@ -77,6 +79,8 @@ export function PromptList({ projectId, type }: PromptListProps) {
         defaultPrompts = [{ name: '场景生成（默认）', template: 'sceneGen' }];
       } else if (type === 'dialog') {
         defaultPrompts = [{ name: '对话生成（默认）', template: 'dialogGen' }];
+      } else if (type === 'portrait') {
+        defaultPrompts = [{ name: '立绘关键词生成（默认）', template: 'portraitKeywords' }];
       }
 
       // 检查每个默认提示词是否存在，不存在则创建
@@ -234,7 +238,15 @@ export function PromptList({ projectId, type }: PromptListProps) {
     <div className="space-y-4">
       <div className="flex justify-between items-center">
         <h3 className="text-lg font-semibold">
-          {type === 'world' ? '世界观提示词列表' : type === 'character' ? '角色提示词列表' : type === 'scene' ? '场景提示词列表' : '对话提示词列表'}
+          {type === 'world'
+            ? '世界观提示词列表'
+            : type === 'character'
+              ? '角色提示词列表'
+              : type === 'scene'
+                ? '场景提示词列表'
+                : type === 'portrait'
+                  ? '立绘提示词列表'
+                  : '对话提示词列表'}
         </h3>
         <div className="flex gap-2">
           <Button variant="outline" onClick={restoreDefaultPrompts}>

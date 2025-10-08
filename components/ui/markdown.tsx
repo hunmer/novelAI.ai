@@ -4,7 +4,6 @@ import remarkGfm from "remark-gfm"
 import rehypeHighlight from "rehype-highlight"
 
 import { cn } from "@/lib/utils"
-import "highlight.js/styles/github-dark.css"
 
 interface MarkdownProps {
   children: string

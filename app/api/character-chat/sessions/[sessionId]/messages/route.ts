@@ -4,6 +4,9 @@ import { AI_CONFIG } from '@/lib/ai/config';
 import { getDefaultModel } from '@/lib/ai/dynamic-config';
 import { generateText } from 'ai';
 
+const DEFAULT_CONTEXT_LIMIT = 20;
+const MAX_CONTEXT_LIMIT = 50;
+
 function formatJsonString(raw: string | null): string {
   if (!raw) return '无';
 
@@ -53,11 +56,16 @@ export async function POST(
   const sessionId = params.sessionId;
 
   try {
-    const { content } = await req.json();
+    const { content, contextLimit: rawContextLimit } = await req.json();
 
     if (typeof content !== 'string' || content.trim().length === 0) {
       return NextResponse.json({ error: '消息内容不能为空' }, { status: 400 });
     }
+
+    const parsedContextLimit = Number(rawContextLimit);
+    const contextLimit = Number.isFinite(parsedContextLimit)
+      ? Math.min(Math.max(1, Math.floor(parsedContextLimit)), MAX_CONTEXT_LIMIT)
+      : DEFAULT_CONTEXT_LIMIT;
 
     const session = await prisma.characterChatSession.findUnique({
       where: { id: sessionId },
@@ -106,7 +114,9 @@ export async function POST(
       orderBy: { createdAt: 'asc' },
     });
 
-    const conversationLog = buildConversationLog(messages, session.character.name);
+    const conversationMessages = messages.slice(-contextLimit);
+
+    const conversationLog = buildConversationLog(conversationMessages, session.character.name);
     const characterProfile = formatJsonString(session.character.attributes);
     const worldProfile = formatJsonString(session.character.project?.world ?? null);
 

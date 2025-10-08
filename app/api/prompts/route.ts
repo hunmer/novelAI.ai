@@ -5,13 +5,15 @@ import path from 'path';
 
 const PROMPTS_FILE = path.join(process.cwd(), 'data', 'prompts.json');
 
+type PromptType = 'world' | 'character' | 'scene' | 'dialog' | 'portrait';
+
 interface Prompt {
   id: string;
   name: string;
   content?: string;
   system?: string;
   user?: string;
-  type: 'world' | 'character' | 'scene' | 'dialog';
+  type: PromptType;
   projectId: string;
   createdAt: string;
   updatedAt: string;
@@ -46,7 +48,7 @@ export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const projectId = searchParams.get('projectId');
-    const type = searchParams.get('type') as 'world' | 'character' | 'scene' | 'dialog' | null;
+    const type = searchParams.get('type') as PromptType | null;
 
     let prompts = await getPrompts();
 

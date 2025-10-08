@@ -1,4 +1,8 @@
 import { PrismaClient } from '@prisma/client';
+import {
+  ProviderType,
+  normalizeProviderType,
+} from './provider-types';
 
 const prisma = new PrismaClient();
 
@@ -33,7 +37,7 @@ export interface ProviderModelConfig {
 export interface ModelProviderConfig {
   id?: string;
   name: string;
-  type: 'openai' | 'anthropic' | 'custom';
+  type: ProviderType;
   apiKey: string;
   baseUrl?: string;
   models: ProviderModelConfig[];
@@ -216,7 +220,7 @@ function mapPrismaProvider(provider: any): ModelProviderConfig {
   return {
     id: provider.id,
     name: provider.name,
-    type: provider.type as 'openai' | 'anthropic' | 'custom',
+    type: normalizeProviderType(provider.type),
     apiKey: provider.apiKey,
     baseUrl: provider.baseUrl || undefined,
     models: parsedModels,

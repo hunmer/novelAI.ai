@@ -4,13 +4,15 @@ import path from 'path';
 
 const PROMPTS_FILE = path.join(process.cwd(), 'data', 'prompts.json');
 
+type PromptType = 'world' | 'character' | 'scene' | 'dialog' | 'portrait';
+
 interface Prompt {
   id: string;
   name: string;
   content?: string;
   system?: string;
   user?: string;
-  type: 'world' | 'character' | 'scene' | 'dialog';
+  type: PromptType;
   projectId: string;
   createdAt: string;
   updatedAt: string;

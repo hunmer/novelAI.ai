@@ -6,6 +6,7 @@ import { ProjectHeaderWrapper } from '@/components/project/project-header-wrappe
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { KnowledgeBaseTab } from '@/components/project/knowledge-base-tab';
 import { CharacterChatTab } from '@/components/project/character-chat-tab';
+import { parseProjectTags } from '@/lib/utils/project';
 
 export default async function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -17,7 +18,16 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
 
   return (
     <>
-      <ProjectHeaderWrapper projectId={project.id} projectName={project.name} />
+      <ProjectHeaderWrapper
+        project={{
+          id: project.id,
+          name: project.name,
+          description: project.description,
+          author: project.author,
+          coverImage: project.coverImage,
+          tags: parseProjectTags(project.tags),
+        }}
+      />
       <div className="container py-6">
         <Tabs defaultValue="world">
           <TabsList className="mb-6">

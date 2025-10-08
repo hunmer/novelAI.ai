@@ -3,6 +3,7 @@ import path from 'path';
 
 const IMAGE_DIR = path.join(process.cwd(), 'public', 'generated-images');
 const THUMBNAIL_DIR = path.join(IMAGE_DIR, 'thumbnails');
+const PROJECT_COVER_DIR = path.join(process.cwd(), 'public', 'project-covers');
 
 export type StoredImageInfo = {
   absolutePath: string;
@@ -18,12 +19,19 @@ function toPublicPath(...segments: string[]) {
   return `/${path.posix.join(...segments)}`;
 }
 
+type ImageKind = 'original' | 'thumbnail' | 'project-cover';
+
 export async function persistImage(
   buffer: Buffer,
   fileName: string,
-  type: 'original' | 'thumbnail'
+  type: ImageKind
 ): Promise<StoredImageInfo> {
-  const baseDir = type === 'original' ? IMAGE_DIR : THUMBNAIL_DIR;
+  const baseDir =
+    type === 'original'
+      ? IMAGE_DIR
+      : type === 'thumbnail'
+        ? THUMBNAIL_DIR
+        : PROJECT_COVER_DIR;
   await ensureDirectory(baseDir);
   const absolutePath = path.join(baseDir, fileName);
   await fs.writeFile(absolutePath, buffer);
@@ -31,7 +39,9 @@ export async function persistImage(
   const publicSegments =
     type === 'original'
       ? ['generated-images', fileName]
-      : ['generated-images', 'thumbnails', fileName];
+      : type === 'thumbnail'
+        ? ['generated-images', 'thumbnails', fileName]
+        : ['project-covers', fileName];
 
   return {
     absolutePath,

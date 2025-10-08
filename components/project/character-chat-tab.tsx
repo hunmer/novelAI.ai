@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -17,6 +18,15 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { History, Loader2, MessageCircle, Plus } from 'lucide-react';
@@ -70,6 +80,8 @@ export function CharacterChatTab({ projectId }: CharacterChatTabProps) {
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [creatingSession, setCreatingSession] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [contextLimit, setContextLimit] = useState(20);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const selectedCharacter = useMemo(
     () => characters.find((item) => item.id === selectedCharacterId) ?? null,
@@ -251,7 +263,7 @@ export function CharacterChatTab({ projectId }: CharacterChatTabProps) {
       const response = await fetch(`/api/character-chat/sessions/${selectedSessionId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content, contextLimit }),
       });
 
       if (!response.ok) {
@@ -285,6 +297,7 @@ export function CharacterChatTab({ projectId }: CharacterChatTabProps) {
     inputValue,
     sendingMessage,
     selectedCharacterId,
+    contextLimit,
     fetchSessions,
   ]);
 
@@ -297,13 +310,7 @@ export function CharacterChatTab({ projectId }: CharacterChatTabProps) {
       );
     }
 
-    if (!selectedSessionId) {
-      return (
-        <Card className="flex h-full items-center justify-center border-dashed text-muted-foreground">
-          当前角色没有聊天记录，点击右上角“新建对话”开始交流
-        </Card>
-      );
-    }
+    const hasActiveSession = Boolean(selectedSessionId);
 
     return (
       <Card className="flex h-full flex-col overflow-hidden">
@@ -313,7 +320,9 @@ export function CharacterChatTab({ projectId }: CharacterChatTabProps) {
               <MessageCircle className="h-4 w-4 text-primary" />
               {selectedSession?.title || selectedCharacter.name}
             </div>
-            <div className="text-xs text-muted-foreground">{selectedSession ? formatDateTime(selectedSession.updatedAt) : ''}</div>
+            <div className="text-xs text-muted-foreground">
+              {hasActiveSession && selectedSession ? formatDateTime(selectedSession.updatedAt) : ''}
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <Button
@@ -363,63 +372,73 @@ export function CharacterChatTab({ projectId }: CharacterChatTabProps) {
         </div>
 
         <div className="flex-1 overflow-hidden bg-muted/10">
-          {messagesLoading ? (
-            <div className="flex h-full items-center justify-center text-muted-foreground">
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              正在加载聊天记录...
-            </div>
-          ) : messages.length ? (
-            <ChatMessageList smooth className="h-full">
-              {messages.map((message) => (
-                <ChatBubble key={message.id} variant={message.role === 'user' ? 'sent' : 'received'}>
-                  <ChatBubbleAvatar
-                    src={message.role === 'assistant' ? selectedCharacter.portraitThumbnail || selectedCharacter.portraitImage : undefined}
-                    fallback={message.role === 'assistant' ? (selectedCharacter.name?.[0] ?? '角') : '我'}
-                  />
-                  <ChatBubbleMessage
-                    variant={message.role === 'user' ? 'sent' : 'received'}
-                    isLoading={Boolean(message.pending && message.role === 'assistant')}
-                  >
-                    {message.content}
-                  </ChatBubbleMessage>
-                  {!message.pending && (
-                    <ChatBubbleTimestamp timestamp={formatTime(message.createdAt)} />
-                  )}
-                </ChatBubble>
-              ))}
-            </ChatMessageList>
+          {hasActiveSession ? (
+            messagesLoading ? (
+              <div className="flex h-full items-center justify-center text-muted-foreground">
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                正在加载聊天记录...
+              </div>
+            ) : messages.length ? (
+              <ChatMessageList smooth className="h-full">
+                {messages.map((message) => (
+                  <ChatBubble key={message.id} variant={message.role === 'user' ? 'sent' : 'received'}>
+                    <ChatBubbleAvatar
+                      src={message.role === 'assistant' ? selectedCharacter.portraitThumbnail || selectedCharacter.portraitImage : undefined}
+                      fallback={message.role === 'assistant' ? (selectedCharacter.name?.[0] ?? '角') : '我'}
+                    />
+                    <ChatBubbleMessage
+                      variant={message.role === 'user' ? 'sent' : 'received'}
+                      isLoading={Boolean(message.pending && message.role === 'assistant')}
+                    >
+                      {message.content}
+                    </ChatBubbleMessage>
+                    {!message.pending && (
+                      <ChatBubbleTimestamp timestamp={formatTime(message.createdAt)} />
+                    )}
+                  </ChatBubble>
+                ))}
+              </ChatMessageList>
+            ) : (
+              <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
+                <MessageCircle className="h-12 w-12" />
+                <p>还没有对话，先向角色说点什么吧。</p>
+              </div>
+            )
           ) : (
-            <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
-              <MessageCircle className="h-12 w-12" />
-              <p>还没有对话，先向角色说点什么吧。</p>
+            <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
+              当前角色没有聊天记录，点击右上角“新建对话”开始交流
             </div>
           )}
         </div>
 
-        <Separator />
+        {hasActiveSession ? (
+          <>
+            <Separator />
 
-        <div className="px-4 py-3">
-          <div className="rounded-lg border bg-background p-3">
-            <ChatInput
-              value={inputValue}
-              onChange={(event) => setInputValue(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault();
-                  handleSend();
-                }
-              }}
-              disabled={sendingMessage}
-              placeholder={`以${selectedCharacter.name}的身份继续对话...`}
-            />
-            <div className="mt-3 flex items-center justify-end">
-              <Button onClick={handleSend} disabled={sendingMessage || !inputValue.trim()}>
-                {sendingMessage ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                发送
-              </Button>
+            <div className="px-4 py-3">
+              <div className="rounded-lg border bg-background p-3">
+                <ChatInput
+                  value={inputValue}
+                  onChange={(event) => setInputValue(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault();
+                      handleSend();
+                    }
+                  }}
+                  disabled={sendingMessage}
+                  placeholder={`以${selectedCharacter.name}的身份继续对话...`}
+                />
+                <div className="mt-3 flex items-center justify-end">
+                  <Button onClick={handleSend} disabled={sendingMessage || !inputValue.trim()}>
+                    {sendingMessage ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    发送
+                  </Button>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
+          </>
+        ) : null}
       </Card>
     );
   };
@@ -448,15 +467,62 @@ export function CharacterChatTab({ projectId }: CharacterChatTabProps) {
                     : 'hover:border-primary/40'
                 )}
               >
-                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-secondary text-sm font-semibold text-secondary-foreground">
-                  {character.name?.slice(0, 2) ?? '角色'}
-                </span>
+                <div className="relative h-10 w-10 overflow-hidden rounded-full bg-secondary">
+                  {character.portraitThumbnail || character.portraitImage ? (
+                    <Image
+                      src={character.portraitThumbnail || character.portraitImage || ''}
+                      alt={`${character.name ?? '角色'}头像`}
+                      fill
+                      className="object-cover"
+                    />
+                  ) : (
+                    <span className="flex h-full w-full items-center justify-center text-sm font-semibold text-secondary-foreground">
+                      {character.name?.slice(0, 2) ?? '角色'}
+                    </span>
+                  )}
+                </div>
                 <div className="flex-1">
                   <div className="text-sm font-medium line-clamp-1">{character.name}</div>
                   <div className="text-xs text-muted-foreground">点击查看对话</div>
                 </div>
               </button>
             ))}
+          </div>
+          <div className="mt-4">
+            <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+              <DialogTrigger asChild>
+                <Button type="button" variant="outline" className="w-full">
+                  设置
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>聊天上下文设置</DialogTitle>
+                  <DialogDescription>控制每次请求发送到模型的历史消息数量。</DialogDescription>
+                </DialogHeader>
+                <div className="flex flex-col gap-4">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="context-limit" className="text-sm font-medium">
+                      最大上下文消息数
+                    </Label>
+                    <span className="text-sm text-muted-foreground">{contextLimit}</span>
+                  </div>
+                  <input
+                    id="context-limit"
+                    type="range"
+                    min={1}
+                    max={50}
+                    step={1}
+                    value={contextLimit}
+                    onChange={(event) => setContextLimit(Number(event.target.value) || 1)}
+                    className="w-full"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    从最近的消息开始向上读取，最多保留上述数量的消息进入模型上下文。
+                  </p>
+                </div>
+              </DialogContent>
+            </Dialog>
           </div>
         </Card>
       </div>
