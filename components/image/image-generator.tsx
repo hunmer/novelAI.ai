@@ -296,6 +296,15 @@ export function ImageGenerator({
     fetchImageHistory();
   }, [fetchImageHistory]);
 
+  useEffect(() => {
+    setGeneratedImageUrl('');
+    setImageHistory([]);
+    setActiveSlide(0);
+    setIsLightboxOpen(false);
+    hasAutoFilledPortrait.current = false;
+    setSelectedPortraitPresetId(PORTRAIT_PRESET_CUSTOM);
+  }, [characterId]);
+
   const displayedImages = useMemo<GalleryImage[]>(() => {
     if (!imageHistory.length && !highlightImageUrl) {
       return [];
@@ -361,25 +370,38 @@ export function ImageGenerator({
     setIsLightboxOpen(false);
   }, [activeSlide, displayedImages, onSetBackground]);
 
+  const deleteImage = useCallback(
+    async (target?: GalleryImage | null) => {
+      if (!target || target.isSynthetic) {
+        return false;
+      }
+      try {
+        const res = await fetch(`/api/ai/image?id=${target.id}`, { method: 'DELETE' });
+        if (!res.ok) {
+          throw new Error('删除图片失败');
+        }
+        await fetchImageHistory();
+        setGeneratedImageUrl((current) =>
+          current === target.imageUrl ? '' : current
+        );
+        return true;
+      } catch (error) {
+        console.error('删除图片失败:', error);
+        alert('删除图片失败，请稍后再试');
+        return false;
+      }
+    },
+    [fetchImageHistory]
+  );
+
   const handleDeleteSlide = useCallback(async () => {
     const target = displayedImages[activeSlide];
-    if (!target || target.isSynthetic) return;
-
-    try {
-      const res = await fetch(`/api/ai/image?id=${target.id}`, { method: 'DELETE' });
-      if (!res.ok) {
-        throw new Error('删除图片失败');
-      }
-      await fetchImageHistory();
-      setGeneratedImageUrl((current) =>
-        current === target.imageUrl ? '' : current
-      );
+    const removed = await deleteImage(target);
+    if (removed) {
       setIsLightboxOpen(false);
-    } catch (error) {
-      console.error('删除图片失败:', error);
-      alert('删除图片失败，请稍后再试');
+      setActiveSlide(0);
     }
-  }, [activeSlide, displayedImages, fetchImageHistory]);
+  }, [activeSlide, deleteImage, displayedImages]);
 
   const handlePortraitPresetChange = useCallback(
     (value: string) => {
@@ -653,6 +675,19 @@ export function ImageGenerator({
                     {img.prompt || '暂无提示词'}
                   </div>
                 </div>
+                {!img.isCurrentBackground && !img.isSynthetic && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="absolute top-2 right-2 h-8 w-8 bg-background/80 hover:bg-background text-destructive"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void deleteImage(img);
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
                 {img.isCurrentBackground && (
                   <div className="absolute right-2 top-2 rounded-full bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground shadow">
                     当前背景

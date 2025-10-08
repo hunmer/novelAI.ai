@@ -3,6 +3,7 @@ import {
   createKnowledgeEntry,
   deleteKnowledgeEntry,
   listKnowledgeEntries,
+  updateKnowledgeEntry,
 } from '@/lib/actions/knowledge.actions';
 
 export async function GET(
@@ -39,6 +40,37 @@ export async function POST(
   } catch (error) {
     const message = error instanceof Error ? error.message : '保存知识库失败';
     return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function PUT(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id: projectId } = await params;
+    const { entryId, content, metadata } = await req.json();
+
+    if (!entryId || typeof entryId !== 'string') {
+      return NextResponse.json(
+        { error: 'entryId 字段不能为空' },
+        { status: 400 }
+      );
+    }
+
+    if (!content || typeof content !== 'string') {
+      return NextResponse.json(
+        { error: 'content 字段不能为空' },
+        { status: 400 }
+      );
+    }
+
+    const entry = await updateKnowledgeEntry(projectId, entryId, content, metadata);
+    return NextResponse.json({ entry });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '更新知识库失败';
+    const status = message.includes('不存在') ? 404 : 500;
+    return NextResponse.json({ error: message }, { status });
   }
 }
 

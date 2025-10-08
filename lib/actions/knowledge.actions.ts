@@ -129,6 +129,45 @@ export async function deleteKnowledgeEntry(id: string): Promise<void> {
   await prisma.knowledgeBase.delete({ where: { id } });
 }
 
+export async function updateKnowledgeEntry(
+  projectId: string,
+  id: string,
+  content: string,
+  metadata?: KnowledgeMetadata
+): Promise<KnowledgeEntry> {
+  if (!content.trim()) {
+    throw new Error('知识库内容不能为空');
+  }
+
+  const existing = await prisma.knowledgeBase.findUnique({
+    where: { id },
+    select: { projectId: true },
+  });
+
+  if (!existing || existing.projectId !== projectId) {
+    throw new Error('知识库片段不存在或不属于当前项目');
+  }
+
+  const vector = await generateEmbedding(content);
+
+  const record = await prisma.knowledgeBase.update({
+    where: { id },
+    data: {
+      content,
+      metadata: serializeMetadata(metadata),
+      embedding: serializeEmbedding(vector),
+    },
+  });
+
+  return {
+    id: record.id,
+    projectId: record.projectId,
+    content: record.content,
+    metadata: metadata || {},
+    createdAt: record.createdAt,
+  };
+}
+
 export async function searchKnowledgeEntries(
   projectId: string,
   queryEmbedding: number[],

@@ -132,7 +132,7 @@ export async function POST(
       await logger.endSnippet(snippetId);
     }
 
-    return result.toTextStreamResponse();
+    return result.toAIStreamResponse();
   } catch (error) {
     const message =
       error instanceof Error ? error.message : '知识库对话失败';

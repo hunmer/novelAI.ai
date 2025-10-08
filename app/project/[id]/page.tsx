@@ -6,6 +6,7 @@ import { ProjectHeaderWrapper } from '@/components/project/project-header-wrappe
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { KnowledgeBaseTab } from '@/components/project/knowledge-base-tab';
 import { CharacterChatTab } from '@/components/project/character-chat-tab';
+import { PlotTab } from '@/components/project/plot-tab';
 import { parseProjectTags } from '@/lib/utils/project';
 
 export default async function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
@@ -35,6 +36,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
             <TabsTrigger value="characters">角色</TabsTrigger>
             <TabsTrigger value="chat">角色对话</TabsTrigger>
             <TabsTrigger value="scenes">场景</TabsTrigger>
+            <TabsTrigger value="plot">剧情</TabsTrigger>
             <TabsTrigger value="knowledge">知识库</TabsTrigger>
           </TabsList>
           <TabsContent value="world">
@@ -48,6 +50,9 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           </TabsContent>
           <TabsContent value="scenes">
             <SceneEditor projectId={project.id} worldContext={project.world || ''} />
+          </TabsContent>
+          <TabsContent value="plot">
+            <PlotTab projectId={project.id} />
           </TabsContent>
           <TabsContent value="knowledge">
             <KnowledgeBaseTab projectId={project.id} />

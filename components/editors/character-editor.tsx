@@ -12,7 +12,7 @@ import {
   updateCharacter,
   deleteCharacter,
 } from '@/lib/actions/character.actions';
-import { SparklesIcon, PlusIcon, TrashIcon } from 'lucide-react';
+import { SparklesIcon, TrashIcon } from 'lucide-react';
 import type { Character } from '@prisma/client';
 import { ImageGenerator } from '@/components/image/image-generator';
 import dynamic from 'next/dynamic';
@@ -167,29 +167,47 @@ export function CharacterEditor({ projectId, worldContext }: CharacterEditorProp
 
         <div className="space-y-2">
           <h3 className="text-sm font-medium">角色列表</h3>
-          {characters.map((char) => (
-            <Card
-              key={char.id}
-              className={`p-3 cursor-pointer ${
-                selectedId === char.id ? 'border-primary' : ''
-              }`}
-              onClick={() => setSelectedId(char.id)}
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-medium">{char.name}</span>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDelete(char.id);
-                  }}
-                >
-                  <TrashIcon className="h-4 w-4" />
-                </Button>
-              </div>
-            </Card>
-          ))}
+          {characters.map((char) => {
+            const thumbnail = char.portraitThumbnail || char.portraitImage;
+            const fallbackLabel = char.name?.slice(0, 2) ?? '角色';
+            return (
+              <Card
+                key={char.id}
+                className={`p-3 cursor-pointer ${
+                  selectedId === char.id ? 'border-primary' : ''
+                }`}
+                onClick={() => setSelectedId(char.id)}
+              >
+                <div className="flex items-center gap-3">
+                  {thumbnail ? (
+                    <img
+                      src={thumbnail}
+                      alt={`${char.name ?? '角色'}插画`}
+                      className="h-12 w-12 rounded-md object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-12 w-12 items-center justify-center rounded-md bg-muted text-sm font-medium text-muted-foreground">
+                      {fallbackLabel}
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium truncate">{char.name}</div>
+                  </div>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDelete(char.id);
+                    }}
+                    aria-label="删除角色"
+                  >
+                    <TrashIcon className="h-4 w-4" />
+                  </Button>
+                </div>
+              </Card>
+            );
+          })}
         </div>
       </div>
 

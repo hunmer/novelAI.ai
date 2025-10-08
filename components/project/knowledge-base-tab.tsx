@@ -8,7 +8,21 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, MessageCircle, Plus, Send, Trash2, Upload, X } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Loader2, MessageCircle, Pencil, Plus, Send, Trash2, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ImportSettingsDialog } from '@/components/dialogs/import-settings-dialog';
@@ -32,6 +46,9 @@ export function KnowledgeBaseTab({ projectId }: KnowledgeBaseTabProps) {
   const [title, setTitle] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<KnowledgeEntry | null>(null);
+  const [draftMetadata, setDraftMetadata] = useState<Record<string, unknown>>({});
   const [chatInput, setChatInput] = useState('');
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -90,9 +107,40 @@ export function KnowledgeBaseTab({ projectId }: KnowledgeBaseTabProps) {
     fetchEntries();
   }, [fetchEntries]);
 
-  const handleCreateEntry = async (event: React.FormEvent<HTMLFormElement>) => {
+  const resetEditorState = () => {
+    setEditingEntry(null);
+    setContent('');
+    setTitle('');
+    setDraftMetadata({});
+    setFormError(null);
+  };
+
+  const handleDialogOpenChange = (open: boolean) => {
+    setIsDialogOpen(open);
+    if (!open) {
+      resetEditorState();
+    }
+  };
+
+  const openCreateDialog = () => {
+    resetEditorState();
+    setIsDialogOpen(true);
+  };
+
+  const openEditDialog = (entry: KnowledgeEntry) => {
+    setEditingEntry(entry);
+    setTitle(typeof entry.metadata?.title === 'string' ? entry.metadata.title : '');
+    setContent(entry.content);
+    setDraftMetadata({ ...entry.metadata });
+    setFormError(null);
+    setIsDialogOpen(true);
+  };
+
+  const handleSubmitEntry = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!content.trim()) {
+    const trimmedContent = content.trim();
+
+    if (!trimmedContent) {
       setFormError('请输入需要写入知识库的内容');
       return;
     }
@@ -101,27 +149,51 @@ export function KnowledgeBaseTab({ projectId }: KnowledgeBaseTabProps) {
     setFormError(null);
 
     try {
-      const payload = {
-        content: content.trim(),
-        metadata: title ? { title } : undefined,
-      };
+      const baseMetadata = editingEntry ? { ...draftMetadata } : {};
+      const trimmedTitle = title.trim();
+
+      const metadataPayload = (() => {
+        if (trimmedTitle) {
+          return { ...baseMetadata, title: trimmedTitle };
+        }
+
+        if (editingEntry && 'title' in baseMetadata) {
+          const { title: _removed, ...rest } = baseMetadata as Record<string, unknown> & {
+            title?: unknown;
+          };
+          return Object.keys(rest).length ? rest : undefined;
+        }
+
+        return Object.keys(baseMetadata).length ? baseMetadata : undefined;
+      })();
+
+      const payload = editingEntry
+        ? {
+            entryId: editingEntry.id,
+            content: trimmedContent,
+            metadata: metadataPayload,
+          }
+        : {
+            content: trimmedContent,
+            metadata: metadataPayload,
+          };
 
       const res = await fetch(`/api/projects/${projectId}/knowledge`, {
-        method: 'POST',
+        method: editingEntry ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data?.error || '保存失败');
+        throw new Error(data?.error || (editingEntry ? '更新失败' : '保存失败'));
       }
 
-      setContent('');
-      setTitle('');
       await fetchEntries();
+      handleDialogOpenChange(false);
     } catch (error) {
-      const message = error instanceof Error ? error.message : '保存失败';
+      const fallback = editingEntry ? '更新失败' : '保存失败';
+      const message = error instanceof Error ? error.message : fallback;
       setFormError(message);
     } finally {
       setIsSaving(false);
@@ -151,15 +223,31 @@ export function KnowledgeBaseTab({ projectId }: KnowledgeBaseTabProps) {
 
   const formattedMessages = useMemo(() => {
     return messages.map((message) => {
-      const textParts = message.parts?.
-        map((part) => (part.type === 'text' ? part.text : ''))
-        .filter(Boolean);
+      const { parts, content } = message as {
+        parts?: Array<{ type?: string; text?: string }>;
+        content?: unknown;
+      };
 
-      const textContent = textParts?.length
-        ? textParts.join('\n')
-        : typeof (message as { content?: unknown }).content === 'string'
-          ? (message as { content?: string }).content
-          : '';
+      let textContent =
+        parts
+          ?.map((part) => (part?.type === 'text' ? part.text ?? '' : ''))
+          .filter(Boolean)
+          .join('\n') ?? '';
+
+      if (!textContent) {
+        if (typeof content === 'string') {
+          textContent = content;
+        } else if (Array.isArray(content)) {
+          textContent = content
+            .map((item) =>
+              item && typeof item === 'object' && 'type' in item && item.type === 'text'
+                ? ((item as { text?: string }).text ?? '')
+                : ''
+            )
+            .filter(Boolean)
+            .join('\n');
+        }
+      }
 
       return {
         id: message.id,
@@ -186,10 +274,6 @@ export function KnowledgeBaseTab({ projectId }: KnowledgeBaseTabProps) {
     }
   };
 
-  const handleInsertSnippet = (snippet: string) => {
-    setChatInput((prev) => (prev ? `${prev}\n${snippet}` : snippet));
-  };
-
   const handleClearConversation = () => {
     setMessages([]);
     setChatInput('');
@@ -206,15 +290,81 @@ export function KnowledgeBaseTab({ projectId }: KnowledgeBaseTabProps) {
 
   return (
     <div className="grid gap-6 lg:grid-cols-[340px,1fr]">
-      <Card className="flex min-h-[600px] flex-col">
+      <Card className="flex min-h-[600px] flex-col lg:max-h-[calc(100vh-160px)] lg:overflow-hidden">
         <div className="flex items-center justify-between border-b px-5 py-4">
           <div>
             <h3 className="text-lg font-semibold">知识库片段</h3>
           </div>
           <div className="flex items-center gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <Plus className="mr-2 h-4 w-4" />
+                  增加片段
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-40">
+                <DropdownMenuItem onSelect={openCreateDialog}>
+                  新建片段
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <ImportSettingsDialog projectId={projectId} onImportComplete={fetchEntries} />
           </div>
         </div>
+
+        <Dialog open={isDialogOpen} onOpenChange={handleDialogOpenChange}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{editingEntry ? '编辑知识库片段' : '新建知识库片段'}</DialogTitle>
+              <DialogDescription>
+                填写片段标题与内容，提交后系统将生成检索向量。
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleSubmitEntry} className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium" htmlFor="knowledge-title">
+                  片段标题（可选）
+                </label>
+                <Input
+                  id="knowledge-title"
+                  value={title}
+                  onChange={(event) => setTitle(event.target.value)}
+                  placeholder="例如：世界观设定-能源体系"
+                  disabled={isSaving}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium" htmlFor="knowledge-content">
+                  内容
+                </label>
+                <Textarea
+                  id="knowledge-content"
+                  value={content}
+                  onChange={(event) => setContent(event.target.value)}
+                  placeholder="支持 Markdown，提交后自动生成 Embedding"
+                  rows={6}
+                  disabled={isSaving}
+                />
+              </div>
+              {formError && <p className="text-sm text-destructive">{formError}</p>}
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => handleDialogOpenChange(false)}
+                  disabled={isSaving}
+                >
+                  取消
+                </Button>
+                <Button type="submit" disabled={isSaving}>
+                  {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {editingEntry ? '更新片段' : '保存片段'}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
 
         <div className="flex-1 space-y-3 overflow-y-auto px-5 py-4">
           {loadingEntries && (
@@ -262,10 +412,10 @@ export function KnowledgeBaseTab({ projectId }: KnowledgeBaseTabProps) {
                       <Button
                         size="icon"
                         variant="ghost"
-                        onClick={() => handleInsertSnippet(entry.content)}
-                        title="插入到提问"
+                        onClick={() => openEditDialog(entry)}
+                        title="编辑片段"
                       >
-                        <Plus className="h-4 w-4" />
+                        <Pencil className="h-4 w-4" />
                       </Button>
                       <Button
                         size="icon"
@@ -284,55 +434,9 @@ export function KnowledgeBaseTab({ projectId }: KnowledgeBaseTabProps) {
               );
             })}
         </div>
-
-        <form onSubmit={handleCreateEntry} className="space-y-3 border-t px-5 py-4">
-          <div>
-            <label className="mb-1 block text-sm font-medium" htmlFor="knowledge-title">
-              片段标题（可选）
-            </label>
-            <Input
-              id="knowledge-title"
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              placeholder="例如：世界观设定-能源体系"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium" htmlFor="knowledge-content">
-              内容
-            </label>
-            <Textarea
-              id="knowledge-content"
-              value={content}
-              onChange={(event) => setContent(event.target.value)}
-              placeholder="支持 Markdown，提交后自动生成Embedding"
-              rows={5}
-            />
-          </div>
-          {formError && (
-            <p className="text-sm text-destructive">{formError}</p>
-          )}
-          <div className="flex justify-end gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                setContent('');
-                setTitle('');
-                setFormError(null);
-              }}
-            >
-              清空
-            </Button>
-            <Button type="submit" disabled={isSaving}>
-              {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              保存片段
-            </Button>
-          </div>
-        </form>
       </Card>
 
-      <Card className="flex min-h-[600px] flex-col">
+      <Card className="flex min-h-[600px] flex-col lg:max-h-[calc(100vh-160px)] lg:overflow-hidden">
         <div className="flex items-center justify-between border-b px-6 py-4">
           <div>
             <h3 className="text-lg font-semibold">知识库对话</h3>
@@ -372,13 +476,23 @@ export function KnowledgeBaseTab({ projectId }: KnowledgeBaseTabProps) {
           ))}
 
           {isLoading && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              正在生成答案…
-              <Button variant="ghost" size="sm" onClick={handleStop}>
-                <X className="mr-1 h-4 w-4" />
-                停止
-              </Button>
+            <div className="flex justify-start">
+              <div className="max-w-[80%] rounded-lg border bg-muted px-4 py-3 text-sm text-muted-foreground shadow-sm">
+                <div className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  正在检索知识片段并生成回复…
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleStop}
+                  className="mt-3 h-7 px-2 text-xs"
+                >
+                  <X className="mr-1 h-3 w-3" />
+                  停止
+                </Button>
+              </div>
             </div>
           )}
 
