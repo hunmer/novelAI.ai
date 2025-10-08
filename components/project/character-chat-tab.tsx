@@ -624,7 +624,7 @@ function formatDateTime(value: string) {
     return new Date(value).toLocaleString('zh-CN', {
       hour12: false,
     });
-  } catch (_error) {
+  } catch {
     return value;
   }
 }
@@ -636,7 +636,7 @@ function formatTime(value: string) {
       minute: '2-digit',
       hour12: false,
     });
-  } catch (_error) {
+  } catch {
     return value;
   }
 }

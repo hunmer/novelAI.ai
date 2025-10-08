@@ -31,7 +31,7 @@ export interface ProviderModelConfig {
   description?: string;
   capabilities: ModelCapability[];
   defaultFor?: ModelCapability[];
-  metadata?: Record<string, any>;
+  metadata?: Record<string, string | number | boolean | null>;
 }
 
 export interface ModelProviderConfig {
@@ -44,7 +44,7 @@ export interface ModelProviderConfig {
   isDefault?: boolean;
   isActive?: boolean;
   capability?: ModelCapability; // 兼容旧版本的提供商能力
-  metadata?: Record<string, any>;
+  metadata?: Record<string, string | number | boolean | null>;
 }
 
 function isModelCapability(value: unknown): value is ModelCapability {
@@ -126,21 +126,21 @@ function parseProviderModels(
       } else if (item && typeof item === 'object') {
         const config = sanitizeModelConfig(
           {
-            name: typeof (item as any).name === 'string' ? (item as any).name : '',
-            label: typeof (item as any).label === 'string' ? (item as any).label : undefined,
+            name: typeof (item as { name?: unknown }).name === 'string' ? (item as { name: string }).name : '',
+            label: typeof (item as { label?: unknown }).label === 'string' ? (item as { label: string }).label : undefined,
             description:
-              typeof (item as any).description === 'string'
-                ? (item as any).description
+              typeof (item as { description?: unknown }).description === 'string'
+                ? (item as { description: string }).description
                 : undefined,
-            capabilities: Array.isArray((item as any).capabilities)
-              ? (item as any).capabilities
+            capabilities: Array.isArray((item as { capabilities?: unknown }).capabilities)
+              ? (item as { capabilities: ModelCapability[] }).capabilities
               : [],
-            defaultFor: Array.isArray((item as any).defaultFor)
-              ? (item as any).defaultFor
+            defaultFor: Array.isArray((item as { defaultFor?: unknown }).defaultFor)
+              ? (item as { defaultFor: ModelCapability[] }).defaultFor
               : [],
             metadata:
-              (item as any).metadata && typeof (item as any).metadata === 'object'
-                ? (item as any).metadata
+              (item as { metadata?: unknown }).metadata && typeof (item as { metadata: unknown }).metadata === 'object'
+                ? (item as { metadata: Record<string, unknown> }).metadata
                 : undefined,
           },
           fallbackCapability
@@ -193,13 +193,13 @@ function serializeProviderModels(
   return JSON.stringify(sanitized);
 }
 
-function extractDefaultCapabilities(metadata: Record<string, any>): ModelCapability[] {
+function extractDefaultCapabilities(metadata: Record<string, unknown>): ModelCapability[] {
   const defaults = metadata?.defaultCapabilities;
   if (!Array.isArray(defaults)) return [];
   return defaults.filter(isModelCapability);
 }
 
-function mapPrismaProvider(provider: any): ModelProviderConfig {
+function mapPrismaProvider(provider: { id: string; name: string; type: string; apiKey: string; baseUrl?: string | null; models: string | null; metadata: string; isDefault?: boolean; isActive?: boolean }): ModelProviderConfig {
   const metadata = JSON.parse(provider.metadata);
   const fallbackCapability = metadata.capability as ModelCapability | undefined;
   const defaultsFromMetadata = extractDefaultCapabilities(metadata);

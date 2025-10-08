@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import imageCompression from 'browser-image-compression';
+import { useState, useEffect, useCallback } from 'react';
+import Image from 'next/image';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
 import { Card } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
   SelectContent,
@@ -637,9 +637,11 @@ export function ImageGenerator({
         <Card className="p-4">
           <h3 className="text-sm font-medium mb-2">生成的图片</h3>
           <div className="relative">
-            <img
+            <Image
               src={generatedImageUrl}
               alt="Generated"
+              width={800}
+              height={600}
               className="w-full rounded-lg"
             />
             <a
@@ -680,9 +682,11 @@ export function ImageGenerator({
                   handleOpenLightbox(index);
                 }}
               >
-                <img
+                <Image
                   src={img.thumbnailUrl || img.imageUrl}
                   alt={img.prompt}
+                  width={200}
+                  height={200}
                   className="w-full aspect-square object-cover rounded-lg"
                 />
                 <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-all rounded-lg flex items-center justify-center">

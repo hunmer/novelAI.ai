@@ -174,7 +174,7 @@ export function resolveRequestHeaders(
   return { ...providerHeaders, ...modelHeaders };
 }
 
-function buildSimpleProvider<T extends (options?: any) => any>(
+function buildSimpleProvider<T extends (options?: Record<string, unknown>) => unknown>(
   factory: T,
   provider: ModelProviderConfig,
   extraOptions: Record<string, unknown> = {}
@@ -705,8 +705,8 @@ export function createEmbeddingModelFromProvider(
     const googleProvider = getOrCreateProvider(provider, 'google-generative-ai', () =>
       buildGoogleGenerativeAIProvider(provider)
     );
-    if (typeof (googleProvider as any).textEmbedding === 'function') {
-      return (googleProvider as any).textEmbedding(modelName);
+    if (typeof (googleProvider as { textEmbedding?: (model: string) => unknown }).textEmbedding === 'function') {
+      return (googleProvider as { textEmbedding: (model: string) => unknown }).textEmbedding(modelName);
     }
     throw new Error('当前 Google 提供商未提供 Embedding 能力');
   }
@@ -715,8 +715,8 @@ export function createEmbeddingModelFromProvider(
     const vertexProvider = getOrCreateProvider(provider, 'google-vertex', () =>
       buildGoogleVertexProvider(provider)
     );
-    if (typeof (vertexProvider as any).textEmbedding === 'function') {
-      return (vertexProvider as any).textEmbedding(modelName);
+    if (typeof (vertexProvider as { textEmbedding?: (model: string) => unknown }).textEmbedding === 'function') {
+      return (vertexProvider as { textEmbedding: (model: string) => unknown }).textEmbedding(modelName);
     }
     throw new Error('当前 Google Vertex 提供商未提供 Embedding 能力');
   }
@@ -725,8 +725,8 @@ export function createEmbeddingModelFromProvider(
     const mistralProvider = getOrCreateProvider(provider, 'mistral', () =>
       buildMistralProvider(provider)
     );
-    if (typeof (mistralProvider as any).textEmbedding === 'function') {
-      return (mistralProvider as any).textEmbedding(modelName);
+    if (typeof (mistralProvider as { textEmbedding?: (model: string) => unknown }).textEmbedding === 'function') {
+      return (mistralProvider as { textEmbedding: (model: string) => unknown }).textEmbedding(modelName);
     }
     throw new Error('当前 Mistral 提供商未提供 Embedding 能力');
   }
@@ -735,8 +735,8 @@ export function createEmbeddingModelFromProvider(
     const deepinfraProvider = getOrCreateProvider(provider, 'deepinfra', () =>
       buildDeepInfraProvider(provider)
     );
-    if (typeof (deepinfraProvider as any).textEmbedding === 'function') {
-      return (deepinfraProvider as any).textEmbedding(modelName);
+    if (typeof (deepinfraProvider as { textEmbedding?: (model: string) => unknown }).textEmbedding === 'function') {
+      return (deepinfraProvider as { textEmbedding: (model: string) => unknown }).textEmbedding(modelName);
     }
     throw new Error('当前 DeepInfra 提供商未提供 Embedding 能力');
   }
@@ -745,7 +745,7 @@ export function createEmbeddingModelFromProvider(
     const basetenProvider = getOrCreateProvider(provider, 'baseten', () =>
       buildBasetenProvider(provider)
     );
-    const factory = (basetenProvider as any).textEmbeddingModel;
+    const factory = (basetenProvider as { textEmbeddingModel?: (model?: string) => unknown }).textEmbeddingModel;
     if (typeof factory === 'function') {
       return modelName ? factory(modelName) : factory();
     }
@@ -756,8 +756,8 @@ export function createEmbeddingModelFromProvider(
     const vercelProvider = getOrCreateProvider(provider, 'vercel', () =>
       buildVercelProvider(provider)
     );
-    if (typeof (vercelProvider as any).textEmbedding === 'function') {
-      return (vercelProvider as any).textEmbedding(modelName);
+    if (typeof (vercelProvider as { textEmbedding?: (model: string) => unknown }).textEmbedding === 'function') {
+      return (vercelProvider as { textEmbedding: (model: string) => unknown }).textEmbedding(modelName);
     }
     throw new Error('当前 Vercel 提供商未提供 Embedding 能力');
   }
@@ -766,8 +766,8 @@ export function createEmbeddingModelFromProvider(
     const fireworksProvider = getOrCreateProvider(provider, 'fireworks', () =>
       buildFireworksProvider(provider)
     );
-    if (typeof (fireworksProvider as any).textEmbedding === 'function') {
-      return (fireworksProvider as any).textEmbedding(modelName);
+    if (typeof (fireworksProvider as { textEmbedding?: (model: string) => unknown }).textEmbedding === 'function') {
+      return (fireworksProvider as { textEmbedding: (model: string) => unknown }).textEmbedding(modelName);
     }
     throw new Error('当前 Fireworks 提供商未提供 Embedding 能力');
   }
@@ -776,8 +776,8 @@ export function createEmbeddingModelFromProvider(
     const cerebrasProvider = getOrCreateProvider(provider, 'cerebras', () =>
       buildCerebrasProvider(provider)
     );
-    if (typeof (cerebrasProvider as any).textEmbedding === 'function') {
-      return (cerebrasProvider as any).textEmbedding(modelName);
+    if (typeof (cerebrasProvider as { textEmbedding?: (model: string) => unknown }).textEmbedding === 'function') {
+      return (cerebrasProvider as { textEmbedding: (model: string) => unknown }).textEmbedding(modelName);
     }
     throw new Error('当前 Cerebras 提供商未提供 Embedding 能力');
   }
@@ -786,8 +786,8 @@ export function createEmbeddingModelFromProvider(
     const xaiProvider = getOrCreateProvider(provider, 'xai', () =>
       buildXaiProvider(provider)
     );
-    if (typeof (xaiProvider as any).textEmbedding === 'function') {
-      return (xaiProvider as any).textEmbedding(modelName);
+    if (typeof (xaiProvider as { textEmbedding?: (model: string) => unknown }).textEmbedding === 'function') {
+      return (xaiProvider as { textEmbedding: (model: string) => unknown }).textEmbedding(modelName);
     }
     throw new Error('当前 xAI 提供商未提供 Embedding 能力');
   }
@@ -796,8 +796,8 @@ export function createEmbeddingModelFromProvider(
     const deepseekProvider = getOrCreateProvider(provider, 'deepseek', () =>
       buildDeepSeekProvider(provider)
     );
-    if (typeof (deepseekProvider as any).textEmbedding === 'function') {
-      return (deepseekProvider as any).textEmbedding(modelName);
+    if (typeof (deepseekProvider as { textEmbedding?: (model: string) => unknown }).textEmbedding === 'function') {
+      return (deepseekProvider as { textEmbedding: (model: string) => unknown }).textEmbedding(modelName);
     }
     throw new Error('当前 DeepSeek 提供商未提供 Embedding 能力');
   }

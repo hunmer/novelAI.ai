@@ -11,7 +11,7 @@ class Logger {
   private initialized: boolean = false;
   private initializing: boolean = false;
   private connected: boolean = false;
-  private queue: any[] = []; // 初始化前的日志队列
+  private queue: Array<{ level: string; message: string; data?: Record<string, unknown> }> = []; // 初始化前的日志队列
 
   private constructor() {
     // 延迟初始化,等待环境变量加载
@@ -67,7 +67,7 @@ class Logger {
           this.enabled = false;
           this.flushQueueToConsole();
         }
-      } catch (error) {
+      } catch {
         console.warn(`[LogsOP] 初始化失败,将使用 console 输出:`, (error as Error).message);
         this.enabled = false;
         this.flushQueueToConsole();
@@ -86,7 +86,7 @@ class Logger {
       const item = this.queue.shift();
       try {
         await this.client!.log(item);
-      } catch (error) {
+      } catch {
         this.logToConsole(item);
       }
     }
@@ -105,7 +105,7 @@ class Logger {
   /**
    * 输出到标准 console
    */
-  private logToConsole(item: any) {
+  private logToConsole(item: { level: string; prefix: string; text: string }) {
     const { level, prefix, text } = item;
     const message = `[${prefix}] ${text}`;
 
@@ -134,7 +134,7 @@ class Logger {
   /**
    * 记录信息级别日志
    */
-  async info(text: string, prefix = 'app', metadata?: Record<string, any>) {
+  async info(text: string, prefix = 'app', metadata?: Record<string, unknown>) {
     let logData;
 
     if (metadata && Object.keys(metadata).length > 0) {
@@ -168,7 +168,7 @@ class Logger {
 
     try {
       await this.client.log(logData);
-    } catch (error) {
+    } catch {
       this.logToConsole(logData);
     }
   }
@@ -176,7 +176,7 @@ class Logger {
   /**
    * 记录警告级别日志
    */
-  async warn(text: string, prefix = 'app', metadata?: Record<string, any>) {
+  async warn(text: string, prefix = 'app', metadata?: Record<string, unknown>) {
     let logData;
 
     if (metadata && Object.keys(metadata).length > 0) {
@@ -208,7 +208,7 @@ class Logger {
 
     try {
       await this.client.log(logData);
-    } catch (error) {
+    } catch {
       this.logToConsole(logData);
     }
   }
@@ -216,7 +216,7 @@ class Logger {
   /**
    * 记录错误级别日志
    */
-  async error(text: string, prefix = 'app', metadata?: Record<string, any>) {
+  async error(text: string, prefix = 'app', metadata?: Record<string, unknown>) {
     let logData;
 
     if (metadata && Object.keys(metadata).length > 0) {
@@ -248,7 +248,7 @@ class Logger {
 
     try {
       await this.client.log(logData);
-    } catch (error) {
+    } catch {
       this.logToConsole(logData);
     }
   }
@@ -256,7 +256,7 @@ class Logger {
   /**
    * 记录调试级别日志
    */
-  async debug(text: string, prefix = 'app', metadata?: Record<string, any>) {
+  async debug(text: string, prefix = 'app', metadata?: Record<string, unknown>) {
     let logData;
 
     if (metadata && Object.keys(metadata).length > 0) {
@@ -288,7 +288,7 @@ class Logger {
 
     try {
       await this.client.log(logData);
-    } catch (error) {
+    } catch {
       this.logToConsole(logData);
     }
   }
@@ -305,7 +305,7 @@ class Logger {
 
     try {
       return this.client.startSnippet(options);
-    } catch (error) {
+    } catch {
       return null;
     }
   }
@@ -313,7 +313,7 @@ class Logger {
   /**
    * 在片段中记录日志
    */
-  async logSnippet(text: string, snippet_id: string, prefix = 'app', metadata?: Record<string, any>) {
+  async logSnippet(text: string, snippet_id: string, prefix = 'app', metadata?: Record<string, unknown>) {
     const logData = { text, prefix, snippet_id, ...metadata };
 
     if (!this.initialized || !this.enabled || !this.client || !this.connected) {
@@ -323,7 +323,7 @@ class Logger {
 
     try {
       await this.client.log(logData);
-    } catch (error) {
+    } catch {
       this.logToConsole(logData);
     }
   }
@@ -338,7 +338,7 @@ class Logger {
 
     try {
       await this.client.endSnippet({ snippet_id });
-    } catch (error) {
+    } catch {
       // 忽略片段结束错误
     }
   }

@@ -616,8 +616,14 @@ async function generateGeminiImageViaGenerateContent(
   };
 }
 
-function extractGeminiInlineImage(payload: any):
-  | { data: string; mimeType?: string }
+interface GeminiInlineData {
+  data: string;
+  mimeType?: string;
+  mime_type?: string;
+}
+
+function extractGeminiInlineImage(payload: unknown):
+  | GeminiInlineData
   | undefined {
   const candidates = payload?.candidates;
   if (!Array.isArray(candidates)) return undefined;
@@ -901,7 +907,7 @@ async function pollMetaChatTask<T extends { status?: string }>(
       await logger.debug(`${options.providerLabel} 任务状态更新`, 'ai-image', {
         status,
         attempt,
-        taskId: (data as any).id,
+        taskId: data.id,
       });
     }
 

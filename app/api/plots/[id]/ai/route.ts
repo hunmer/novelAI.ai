@@ -28,6 +28,7 @@ type GenerateBody = {
   prompt?: string;
   promptId?: string | null;
   wordBudget?: number;
+  autoInsert?: boolean;
 };
 
 const WORD_BUDGET_MIN = 100;
@@ -172,6 +173,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       return NextResponse.json({ error: 'prompt is required' }, { status: 400 });
     }
 
+    const autoInsert = body.autoInsert ?? true;
     const rawWordBudget = typeof body.wordBudget === 'number' ? body.wordBudget : 800;
     const wordBudget = Math.min(
       WORD_BUDGET_MAX,
@@ -238,10 +240,12 @@ export async function POST(req: NextRequest, { params }: Params) {
       body.promptId
     );
 
+    const workflowToPersist = autoInsert ? nextWorkflow : workflow;
+
     const updatedDialog = await prisma.dialog.update({
       where: { id },
       data: {
-        content: serializePlotWorkflow(nextWorkflow),
+        content: serializePlotWorkflow(workflowToPersist),
         metadata: serializePlotMetadata(nextMetadata),
       },
     });

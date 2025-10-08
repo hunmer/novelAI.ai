@@ -2,14 +2,14 @@ import * as jsondiffpatch from 'jsondiffpatch';
 import { prisma } from '@/lib/db/prisma';
 
 const differ = jsondiffpatch.create({
-  objectHash: (obj: any) => obj.id || JSON.stringify(obj),
+  objectHash: (obj: { id?: unknown } | Record<string, unknown>) => (obj as { id?: unknown }).id || JSON.stringify(obj),
   arrays: { detectMove: true },
 });
 
 export class VersionService {
   static async createSnapshot(
     projectId: string,
-    newData: any,
+    newData: Record<string, unknown>,
     source: 'ai' | 'manual'
   ) {
     const latestVersion = await prisma.version.findFirst({
@@ -17,7 +17,7 @@ export class VersionService {
       orderBy: { createdAt: 'desc' },
     });
 
-    let snapshot: any;
+    let snapshot: string | null;
     let baseVersionId: string | null = null;
 
     if (latestVersion) {
@@ -68,7 +68,7 @@ export class VersionService {
     return state;
   }
 
-  private static async getVersionChain(version: any) {
+  private static async getVersionChain(version: { id: string; baseVersionId: string | null; snapshot: string }) {
     const chain = [version];
     let current = version;
 

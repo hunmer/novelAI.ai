@@ -2,6 +2,7 @@
 
 import type { ChangeEvent, ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Image from 'next/image';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -204,7 +205,7 @@ export function CreateProjectDialog({ project, trigger }: CreateProjectDialogPro
             <div className="flex items-start gap-4">
               <div className="flex h-28 w-28 items-center justify-center overflow-hidden rounded-md border bg-muted">
                 {coverPreview ? (
-                  <img src={coverPreview} alt="项目封面" className="h-full w-full object-cover" />
+                  <Image src={coverPreview} alt="项目封面" width={112} height={112} className="h-full w-full object-cover" />
                 ) : (
                   <span className="px-2 text-center text-xs text-muted-foreground">尚未上传</span>
                 )}

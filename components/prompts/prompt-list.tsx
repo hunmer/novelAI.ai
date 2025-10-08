@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -52,9 +52,9 @@ export function PromptList({ projectId, type }: PromptListProps) {
 
   useEffect(() => {
     fetchPrompts();
-  }, [projectId, type]);
+  }, [projectId, type, fetchPrompts]);
 
-  const fetchPrompts = async () => {
+  const fetchPrompts = useCallback(async () => {
     try {
       const res = await fetch(`/api/prompts?projectId=${projectId}&type=${type}`);
       const data = await res.json();
@@ -64,7 +64,7 @@ export function PromptList({ projectId, type }: PromptListProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [projectId, type]);
 
   const restoreDefaultPrompts = async () => {
     try {

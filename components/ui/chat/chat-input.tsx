@@ -2,9 +2,7 @@ import { forwardRef } from 'react';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 
-interface ChatInputProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {}
-
-export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
+export const ChatInput = forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(
   ({ className, ...props }, ref) => (
     <Textarea
       autoComplete="off"

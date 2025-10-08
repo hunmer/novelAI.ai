@@ -1,6 +1,7 @@
 import { getProjects } from '@/lib/actions/project.actions';
 import { Card } from '@/components/ui/card';
 import Link from 'next/link';
+import Image from 'next/image';
 import { Badge } from '@/components/ui/badge';
 import { parseProjectTags } from '@/lib/utils/project';
 
@@ -24,9 +25,11 @@ export async function ProjectList() {
             <Card className="flex h-full flex-col overflow-hidden transition-shadow hover:shadow-md">
               <div className="h-40 w-full overflow-hidden bg-muted">
                 {project.coverImage ? (
-                  <img
+                  <Image
                     src={project.coverImage}
                     alt={`${project.name} 封面`}
+                    width={320}
+                    height={160}
                     className="h-full w-full object-cover"
                   />
                 ) : (

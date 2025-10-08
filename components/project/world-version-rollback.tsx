@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -38,14 +38,15 @@ export function WorldVersionRollback({
   const [isRestoring, setIsRestoring] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadVersions();
-  }, [projectId]);
 
-  const loadVersions = async () => {
+  const loadVersions = useCallback(async () => {
     const data = await getVersionHistory(projectId);
     setVersions(data);
-  };
+  }, [projectId]);
+
+  useEffect(() => {
+    loadVersions();
+  }, [projectId, loadVersions]);
 
   const handleRestore = async (version: Version) => {
     if (!confirm(`确定要恢复到 ${new Date(version.createdAt).toLocaleString('zh-CN')} 的版本吗？此操作将创建新版本。`)) {

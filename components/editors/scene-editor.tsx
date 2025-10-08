@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -41,15 +41,15 @@ export function SceneEditor({ projectId, worldContext }: SceneEditorProps) {
     loadScenes();
   }, [projectId, loadScenes]);
 
-  const loadScenes = async () => {
+  const loadScenes = useCallback(async () => {
     try {
       const res = await fetch(`/api/scenes?projectId=${projectId}`);
       const data = await res.json();
       setScenes(data.scenes || []);
     } catch (error) {
-      console.error('加载场景失败:', error);
+      console.error('Failed to load scenes:', error);
     }
-  };
+  }, [projectId]);
 
   const handleGenerate = async () => {
     if (!keywords) return;

@@ -16,7 +16,7 @@ export interface OnlineUser {
 
 export interface ProjectPatchEvent {
   module: string;
-  delta: any;
+  delta: Record<string, unknown>;
   version: number;
   userId: string;
   timestamp: number;
@@ -95,7 +95,7 @@ export function useSocket(
   /**
    * 发送事件
    */
-  const emit = useCallback((event: string, data: any) => {
+  const emit = useCallback((event: string, data: Record<string, unknown>) => {
     if (socket?.connected) {
       socket.emit(event, data);
     } else {
@@ -106,14 +106,14 @@ export function useSocket(
   /**
    * 订阅事件
    */
-  const on = useCallback((event: string, handler: (data: any) => void) => {
+  const on = useCallback((event: string, handler: (data: Record<string, unknown>) => void) => {
     socket?.on(event, handler);
   }, []);
 
   /**
    * 取消订阅事件
    */
-  const off = useCallback((event: string, handler?: (data: any) => void) => {
+  const off = useCallback((event: string, handler?: (data: Record<string, unknown>) => void) => {
     if (handler) {
       socket?.off(event, handler);
     } else {

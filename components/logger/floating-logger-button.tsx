@@ -100,7 +100,7 @@ export function FloatingLoggerButton({ onClick }: FloatingLoggerButtonProps) {
   return (
     <button
       ref={buttonRef}
-      onClick={(e) => {
+      onClick={() => {
         // 只有在没有拖动时才触发点击
         if (!isDragging && !hasMoved.current) {
           onClick();

@@ -100,7 +100,7 @@ function CharacterList({ content }: { content: string }) {
         ))}
       </div>
     );
-  } catch (error) {
+  } catch {
     return (
       <div className="text-sm text-muted-foreground">
         <p>JSON解析失败，显示原始内容：</p>

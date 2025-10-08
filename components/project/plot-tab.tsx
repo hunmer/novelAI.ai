@@ -5,6 +5,8 @@ import {
   AlignLeft,
   Loader2,
   MessageCircle,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   RefreshCcw,
   Sparkles,
@@ -22,6 +24,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type {
   FlowgramChoicesSegment,
   FlowgramSegment,
@@ -123,6 +127,8 @@ export function PlotTab({ projectId }: PlotTabProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [aiUsage, setAiUsage] = useState<{ tokens: number; cost: number } | null>(null);
   const [wordBudget, setWordBudget] = useState<number>(800);
+  const [showPlotList, setShowPlotList] = useState(true);
+  const [autoInsertNodes, setAutoInsertNodes] = useState(true);
 
   const selectedPlot = useMemo(() => {
     if (!selectedPlotId) return plots[0] ?? null;
@@ -301,6 +307,7 @@ export function PlotTab({ projectId }: PlotTabProps) {
           prompt: resolvedPrompt,
           promptId: selectedPromptId,
           wordBudget: sanitizedWordBudget,
+          autoInsert: autoInsertNodes,
         }),
       });
       if (!response.ok) {
@@ -393,7 +400,7 @@ export function PlotTab({ projectId }: PlotTabProps) {
     }
   }
 
-  const nodes = selectedPlot?.workflow.nodes ?? [];
+  const plotNodes = selectedPlot?.workflow.nodes ?? [];
 
   return (
     <div className="flex flex-col gap-4">
@@ -402,47 +409,67 @@ export function PlotTab({ projectId }: PlotTabProps) {
           {errorMessage}
         </Card>
       ) : null}
-      <div className="grid grid-cols-[240px_minmax(0,1fr)_340px] gap-4">
-        <Card className="flex h-full flex-col p-4">
-          <div className="mb-4 flex items-center justify-between">
-            <h3 className="text-sm font-semibold">剧情列表</h3>
-            <Button size="icon" variant="outline" onClick={handleCreatePlot}>
-              <Plus className="h-4 w-4" />
-            </Button>
-          </div>
-          <div className="flex-1 space-y-2 overflow-auto pr-2">
-            {loadingPlots ? (
-              <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                加载中...
-              </div>
-            ) : plots.length ? (
-              plots.map((plot) => (
-                <button
-                  key={plot.id}
-                  onClick={() => setSelectedPlotId(plot.id)}
-                  className={cn(
-                    'w-full rounded-lg border border-border bg-background px-3 py-2 text-left text-sm transition-colors hover:border-primary',
-                    selectedPlot?.id === plot.id ? 'border-primary bg-primary/5' : ''
-                  )}
-                >
-                  <div className="font-medium">{plot.metadata.title}</div>
-                  <div className="text-xs text-muted-foreground">
-                    更新于 {new Date(plot.updatedAt).toLocaleString()}
-                  </div>
-                </button>
-              ))
-            ) : (
-              <div className="rounded border border-dashed border-muted p-4 text-center text-xs text-muted-foreground">
-                暂无剧情，请点击上方按钮创建
-              </div>
-            )}
-          </div>
-        </Card>
+      <div
+        className={cn(
+          'grid gap-4',
+          showPlotList ? 'grid-cols-[240px_minmax(0,1fr)_340px]' : 'grid-cols-[minmax(0,1fr)_340px]'
+        )}
+      >
+        {showPlotList ? (
+          <Card className="flex h-full flex-col p-4">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-sm font-semibold">剧情列表</h3>
+              <Button size="icon" variant="outline" onClick={handleCreatePlot}>
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="flex-1 space-y-2 overflow-auto pr-2">
+              {loadingPlots ? (
+                <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  加载中...
+                </div>
+              ) : plots.length ? (
+                plots.map((plot) => (
+                  <button
+                    key={plot.id}
+                    onClick={() => setSelectedPlotId(plot.id)}
+                    className={cn(
+                      'w-full rounded-lg border border-border bg-background px-3 py-2 text-left text-sm transition-colors hover:border-primary',
+                      selectedPlot?.id === plot.id ? 'border-primary bg-primary/5' : ''
+                    )}
+                  >
+                    <div className="font-medium">{plot.metadata.title}</div>
+                    <div className="text-xs text-muted-foreground">
+                      更新于 {new Date(plot.updatedAt).toLocaleString()}
+                    </div>
+                  </button>
+                ))
+              ) : (
+                <div className="rounded border border-dashed border-muted p-4 text-center text-xs text-muted-foreground">
+                  暂无剧情，请点击上方按钮创建
+                </div>
+              )}
+            </div>
+          </Card>
+        ) : null}
 
         <Card className="flex min-h-[640px] flex-col p-4">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
             <div className="flex flex-1 items-center gap-3">
+              <Button
+                type="button"
+                size="icon"
+                variant="outline"
+                onClick={() => setShowPlotList((prev) => !prev)}
+                aria-label={showPlotList ? '隐藏剧情列表' : '显示剧情列表'}
+              >
+                {showPlotList ? (
+                  <PanelLeftClose className="h-4 w-4" />
+                ) : (
+                  <PanelLeftOpen className="h-4 w-4" />
+                )}
+              </Button>
               <Input
                 value={titleDraft}
                 onChange={(event) => setTitleDraft(event.target.value)}
@@ -456,165 +483,178 @@ export function PlotTab({ projectId }: PlotTabProps) {
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" onClick={handleResetPlot}>
                 <RefreshCcw className="mr-1 h-4 w-4" />
-                重置剧情
               </Button>
               <Button variant="destructive" size="sm" onClick={handleDeletePlot}>
                 <Trash2 className="mr-1 h-4 w-4" />
-                删除剧情
               </Button>
             </div>
           </div>
 
           <div className="mt-4 flex-1 overflow-auto pr-2">
-            <FlowTimeline nodes={nodes} />
+            <FlowTimeline nodes={plotNodes} />
           </div>
         </Card>
 
-        <div className="flex flex-col gap-4">
-          <Card className="space-y-3 p-4">
-            <div className="space-y-2">
-              <Label htmlFor="plot-word-budget">目标字数</Label>
-              <div className="flex items-center gap-3">
-                <input
-                  id="plot-word-budget"
-                  type="range"
-                  min={WORD_BUDGET_MIN}
-                  max={WORD_BUDGET_MAX}
-                  step={100}
-                  value={sanitizedWordBudget}
-                  onChange={(event) => setWordBudget(clampWordBudget(Number(event.target.value)))}
-                  className="h-2 w-full flex-1 cursor-pointer appearance-none rounded bg-muted"
-                />
-                <Input
-                  type="number"
-                  min={WORD_BUDGET_MIN}
-                  max={WORD_BUDGET_MAX}
-                  value={sanitizedWordBudget}
-                  onChange={(event) => setWordBudget(clampWordBudget(Number(event.target.value)))}
-                  className="w-28"
-                />
-              </div>
-              <div className="rounded border border-dashed border-muted bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                发送时自动在提示词顶部添加：目标字数：{sanitizedWordBudget}
-              </div>
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">对话提示词列表</Label>
-              <Select
-                value={selectedPromptId ?? undefined}
-                onValueChange={(value) => {
-                  setSelectedPromptId(value);
-                  const prompt = promptList.find((item) => item.id === value);
-                  if (prompt) {
-                    setPromptText(resolvePromptTemplate(prompt.content ?? ''));
-                  }
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="选择提示词" />
-                </SelectTrigger>
-                <SelectContent>
-                  {promptList.map((prompt) => (
-                    <SelectItem key={prompt.id} value={prompt.id}>
-                      {prompt.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="plot-prompt">提示词</Label>
-              <Textarea
-                id="plot-prompt"
-                value={promptText}
-                onChange={(event) => setPromptText(event.target.value)}
-                rows={6}
-                placeholder="描述希望AI延展剧情的方向，例如：聚焦两人关系缓和，强调雨夜细节..."
-              />
-            </div>
-            <Button onClick={handleGenerate} disabled={generating || !selectedPlot}>
-              {generating ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Sparkles className="mr-2 h-4 w-4" />
-              )}
-              生成剧情节点
-            </Button>
-            {aiUsage ? (
-              <div className="rounded bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
-                tokens: {aiUsage.tokens} · cost: ${aiUsage.cost.toFixed(4)}
-              </div>
-            ) : null}
-          </Card>
-
-          <Card className="space-y-3 p-4">
-            <Label className="text-sm font-medium">手动插入节点</Label>
-            <div className="flex gap-2">
-              <ToggleButton
-                active={insertKind === 'dialogue'}
-                onClick={() => setInsertKind('dialogue')}
-              >
-                角色消息
-              </ToggleButton>
-              <ToggleButton
-                active={insertKind === 'narration'}
-                onClick={() => setInsertKind('narration')}
-              >
-                旁白
-              </ToggleButton>
-            </div>
-            {insertKind === 'dialogue' ? (
+        <Card className="flex h-full flex-col p-4">
+          <Tabs defaultValue="generate" className="flex flex-1 flex-col">
+            <TabsList className="grid w-full grid-cols-3 gap-1">
+              <TabsTrigger value="generate">AI 生成</TabsTrigger>
+              <TabsTrigger value="manual">手动插入</TabsTrigger>
+              <TabsTrigger value="result">AI 回复</TabsTrigger>
+            </TabsList>
+            <TabsContent value="generate" className="mt-4 flex flex-col gap-4">
               <div className="space-y-2">
-                <Input
-                  placeholder="角色名称"
-                  value={dialogueCharacter}
-                  onChange={(event) => setDialogueCharacter(event.target.value)}
-                />
-                <Input
-                  placeholder="语气 / 动作"
-                  value={dialogueAction}
-                  onChange={(event) => setDialogueAction(event.target.value)}
-                />
+                <Label htmlFor="plot-word-budget">目标字数</Label>
+                <div className="flex items-center gap-3">
+                  <input
+                    id="plot-word-budget"
+                    type="range"
+                    min={WORD_BUDGET_MIN}
+                    max={WORD_BUDGET_MAX}
+                    step={100}
+                    value={sanitizedWordBudget}
+                    onChange={(event) => setWordBudget(clampWordBudget(Number(event.target.value)))}
+                    className="h-2 w-full flex-1 cursor-pointer appearance-none rounded bg-muted"
+                  />
+                  <Input
+                    type="number"
+                    min={WORD_BUDGET_MIN}
+                    max={WORD_BUDGET_MAX}
+                    value={sanitizedWordBudget}
+                    onChange={(event) => setWordBudget(clampWordBudget(Number(event.target.value)))}
+                    className="w-28"
+                  />
+                </div>
+                <div className="rounded border border-dashed border-muted bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                  发送时自动在提示词顶部添加：目标字数：{sanitizedWordBudget}
+                </div>
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">对话提示词列表</Label>
+                <Select
+                  value={selectedPromptId ?? undefined}
+                  onValueChange={(value) => {
+                    setSelectedPromptId(value);
+                    const prompt = promptList.find((item) => item.id === value);
+                    if (prompt) {
+                      setPromptText(resolvePromptTemplate(prompt.content ?? ''));
+                    }
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择提示词" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {promptList.map((prompt) => (
+                      <SelectItem key={prompt.id} value={prompt.id}>
+                        {prompt.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="plot-prompt">提示词</Label>
                 <Textarea
-                  placeholder="对话内容"
-                  value={messageText}
-                  onChange={(event) => setMessageText(event.target.value)}
-                  rows={3}
+                  id="plot-prompt"
+                  value={promptText}
+                  onChange={(event) => setPromptText(event.target.value)}
+                  rows={6}
+                  placeholder="描述希望AI延展剧情的方向，例如：聚焦两人关系缓和，强调雨夜细节..."
                 />
               </div>
-            ) : (
-              <Textarea
-                placeholder="旁白内容"
-                value={narrationText}
-                onChange={(event) => setNarrationText(event.target.value)}
-                rows={4}
-              />
-            )}
-            <Button onClick={() => void handleInsertNode()} disabled={inserting || !selectedPlot}>
-              {inserting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
-              插入节点
-            </Button>
-          </Card>
-
-          <Card className="flex-1 space-y-3 p-4">
-            <h3 className="text-sm font-semibold">AI 回复结果</h3>
-            <div className="space-y-3 overflow-y-auto pr-2 text-sm">
-              {lastSegments.length ? (
-                lastSegments.map((segment, index) => (
-                  <SegmentPreview
-                    key={`${segment.type}-${index}`}
-                    segment={segment}
-                    onInsertChoice={(option) => void handleUseChoice(option)}
-                  />
-                ))
-              ) : (
-                <div className="rounded border border-dashed border-muted p-4 text-center text-xs text-muted-foreground">
-                  暂无AI回复，先尝试生成剧情节点
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="plot-auto-insert"
+                  checked={autoInsertNodes}
+                  onCheckedChange={(checked) => setAutoInsertNodes(checked === true)}
+                />
+                <Label htmlFor="plot-auto-insert" className="text-sm font-normal text-muted-foreground">
+                  生成后自动插入剧情节点
+                </Label>
+              </div>
+              <Button onClick={handleGenerate} disabled={generating || !selectedPlot}>
+                {generating ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Sparkles className="mr-2 h-4 w-4" />
+                )}
+                生成剧情节点
+              </Button>
+              {aiUsage ? (
+                <div className="rounded bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
+                  tokens: {aiUsage.tokens} · cost: ${aiUsage.cost.toFixed(4)}
                 </div>
+              ) : null}
+            </TabsContent>
+            <TabsContent value="manual" className="mt-4 flex flex-col gap-3">
+              <Label className="text-sm font-medium">手动插入节点</Label>
+              <div className="flex gap-2">
+                <ToggleButton
+                  active={insertKind === 'dialogue'}
+                  onClick={() => setInsertKind('dialogue')}
+                >
+                  角色消息
+                </ToggleButton>
+                <ToggleButton
+                  active={insertKind === 'narration'}
+                  onClick={() => setInsertKind('narration')}
+                >
+                  旁白
+                </ToggleButton>
+              </div>
+              {insertKind === 'dialogue' ? (
+                <div className="space-y-2">
+                  <Input
+                    placeholder="角色名称"
+                    value={dialogueCharacter}
+                    onChange={(event) => setDialogueCharacter(event.target.value)}
+                  />
+                  <Input
+                    placeholder="语气 / 动作"
+                    value={dialogueAction}
+                    onChange={(event) => setDialogueAction(event.target.value)}
+                  />
+                  <Textarea
+                    placeholder="对话内容"
+                    value={messageText}
+                    onChange={(event) => setMessageText(event.target.value)}
+                    rows={3}
+                  />
+                </div>
+              ) : (
+                <Textarea
+                  placeholder="旁白内容"
+                  value={narrationText}
+                  onChange={(event) => setNarrationText(event.target.value)}
+                  rows={4}
+                />
               )}
-            </div>
-          </Card>
-        </div>
+              <Button onClick={() => void handleInsertNode()} disabled={inserting || !selectedPlot}>
+                {inserting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
+                插入节点
+              </Button>
+            </TabsContent>
+            <TabsContent value="result" className="mt-4 flex flex-1 flex-col gap-3 overflow-hidden">
+              <h3 className="text-sm font-semibold">AI 回复结果</h3>
+              <div className="flex-1 space-y-3 overflow-y-auto pr-2 text-sm">
+                {lastSegments.length ? (
+                  lastSegments.map((segment, index) => (
+                    <SegmentPreview
+                      key={`${segment.type}-${index}`}
+                      segment={segment}
+                      onInsertChoice={(option) => void handleUseChoice(option)}
+                    />
+                  ))
+                ) : (
+                  <div className="rounded border border-dashed border-muted p-4 text-center text-xs text-muted-foreground">
+                    暂无AI回复，先尝试生成剧情节点
+                  </div>
+                )}
+              </div>
+            </TabsContent>
+          </Tabs>
+        </Card>
       </div>
     </div>
   );
@@ -634,13 +674,18 @@ const FLOW_BRANCH_OFFSET_X = 280;
 const FLOW_CANVAS_MIN_HEIGHT = 640;
 
 function FlowTimeline({ nodes }: FlowTimelineProps) {
-  if (!nodes.length) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        暂无节点，使用右侧提示词生成或手动插入。
-      </div>
-    );
-  }
+  const orderedNodes = useMemo(
+    () =>
+      [...nodes].sort(
+        (a, b) => {
+          const diff =
+            new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+          if (diff !== 0) return diff;
+          return a.id.localeCompare(b.id);
+        }
+      ),
+    [nodes]
+  );
 
   const nodeTypes = useMemo(
     () => ({
@@ -652,7 +697,7 @@ function FlowTimeline({ nodes }: FlowTimelineProps) {
 
   const flowNodes = useMemo<Node<PlotFlowNodeData>[]>(
     () =>
-      nodes.map((plotNode, index) => ({
+      orderedNodes.map((plotNode, index) => ({
         id: plotNode.id,
         type: plotNode.kind,
         position: {
@@ -666,14 +711,14 @@ function FlowTimeline({ nodes }: FlowTimelineProps) {
         draggable: false,
         selectable: false,
       })),
-    [nodes]
+    [orderedNodes]
   );
 
   const flowEdges = useMemo<Edge[]>(
     () =>
-      nodes.reduce<Edge[]>((accumulator, plotNode, index) => {
+      orderedNodes.reduce<Edge[]>((accumulator, plotNode, index) => {
         if (index === 0) return accumulator;
-        const previous = nodes[index - 1];
+        const previous = orderedNodes[index - 1];
         const label = plotNode.fromOptionId ? `来自分支 ${plotNode.fromOptionId}` : undefined;
         accumulator.push({
           id: `${previous.id}-${plotNode.id}`,
@@ -687,8 +732,16 @@ function FlowTimeline({ nodes }: FlowTimelineProps) {
         });
         return accumulator;
       }, []),
-    [nodes]
+    [orderedNodes]
   );
+
+  if (!orderedNodes.length) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        暂无节点，使用右侧提示词生成或手动插入。
+      </div>
+    );
+  }
 
   return (
     <ReactFlowProvider>

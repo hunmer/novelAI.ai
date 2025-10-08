@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -37,10 +37,10 @@ export function CharacterEditor({ projectId, worldContext }: CharacterEditorProp
     loadCharacters();
   }, [projectId, loadCharacters]);
 
-  const loadCharacters = async () => {
+  const loadCharacters = useCallback(async () => {
     const data = await getCharacters(projectId);
     setCharacters(data);
-  };
+  }, [projectId]);
 
   const handleGenerate = async () => {
     if (!prompt) return;

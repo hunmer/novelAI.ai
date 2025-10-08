@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -20,12 +20,12 @@ export function VersionHistory({ projectId, onRestore }: VersionHistoryProps) {
 
   useEffect(() => {
     loadVersions();
-  }, [projectId]);
+  }, [projectId, loadVersions]);
 
-  const loadVersions = async () => {
+  const loadVersions = useCallback(async () => {
     const data = await getVersionHistory(projectId);
     setVersions(data);
-  };
+  }, [projectId]);
 
   const handleRestore = async (versionId: string) => {
     if (!confirm('确定要恢复到此版本吗?')) return;

@@ -5,7 +5,7 @@ import { prisma } from '@/lib/db/prisma';
 import { getEmbeddingModel } from '@/lib/ai/dynamic-config';
 
 interface KnowledgeMetadata {
-  [key: string]: any;
+  [key: string]: string | number | boolean | null;
 }
 
 export interface KnowledgeEntry {
