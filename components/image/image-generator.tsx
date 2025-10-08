@@ -140,8 +140,15 @@ export function ImageGenerator({
           throw new Error('failed to load portrait presets');
         }
         const data = await res.json();
+        interface PromptResponse {
+          id: string;
+          name: string;
+          user?: string;
+          content?: string;
+          isDefault?: boolean;
+        }
         const presets: PortraitPreset[] = Array.isArray(data.prompts)
-          ? data.prompts.map((item: any) => ({
+          ? data.prompts.map((item: PromptResponse) => ({
               id: item.id,
               name: item.name,
               user: typeof item.user === 'string' ? item.user : item.content ?? '',
@@ -194,10 +201,18 @@ export function ImageGenerator({
         const res = await fetch('/api/models');
         const data = await res.json();
         // 过滤出包含图片能力的模型
+        interface ProviderResponse {
+          id: string;
+          name: string;
+          models?: Array<{
+            name: string;
+            capabilities?: string[];
+          }>;
+        }
         const imageProviders = (data.providers || [])
-          .map((provider: any) => {
+          .map((provider: ProviderResponse) => {
             const models: ProviderModel[] = Array.isArray(provider.models)
-              ? provider.models.filter((model: any) =>
+              ? provider.models.filter((model) =>
                   Array.isArray(model?.capabilities) &&
                   model.capabilities.includes('image')
                 )

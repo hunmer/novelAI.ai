@@ -28,7 +28,7 @@ const customFetch = proxyUrl
         url,
         init: { ...init },
         dispatcher: {
-          ...(dispatcher as any),
+          ...dispatcher,
         },
       });
       return fetch(url, { ...init, dispatcher } as RequestInit);
@@ -171,7 +171,7 @@ export async function GET(req: NextRequest) {
     const characterId = searchParams.get('characterId');
     const limit = parseInt(searchParams.get('limit') || '20');
 
-    const where: any = {};
+    const where: Prisma.GeneratedImageWhereInput = {};
     if (characterId) {
       where.characterId = characterId;
     } else if (sceneId) {
@@ -592,7 +592,7 @@ async function generateGeminiImageViaGenerateContent(
     );
   }
 
-  let parsed: any;
+  let parsed: unknown;
   try {
     parsed = raw ? JSON.parse(raw) : {};
   } catch (error) {
@@ -685,7 +685,12 @@ async function generateWithMetaChatBase(
   const aspectRatio = toAspectRatio(size);
   const params = buildMetaChatParams(modelMetadata, provider.metadata, aspectRatio);
 
-  const payload: Record<string, unknown> = {
+  const payload: {
+    prompt: string;
+    model?: string;
+    params?: Record<string, unknown>;
+    images?: Array<Record<string, unknown>>;
+  } = {
     prompt,
     model:
       typeof modelMetadata.model === 'string' && modelMetadata.model.trim()
@@ -729,7 +734,7 @@ async function generateWithMetaChatBase(
     throw new Error(`${profile.providerLabel} 返回数据为空`);
   }
 
-  const normalizedTask = taskData as Record<string, unknown>;
+  const normalizedTask = taskData;
   const taskStatus = typeof normalizedTask.status === 'string' ? normalizedTask.status.toLowerCase() : '';
 
   if (taskStatus !== 'success') {

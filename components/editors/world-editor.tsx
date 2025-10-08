@@ -4,7 +4,6 @@ import { useState, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card } from '@/components/ui/card';
-import { Label } from '@/components/ui/label';
 import { updateWorld } from '@/lib/actions/world.actions';
 import { WorldVersionRollback } from '@/components/project/world-version-rollback';
 import { useSocket } from '@/lib/socket/client';
@@ -77,7 +76,11 @@ export function WorldEditor({ projectId, initialWorld }: WorldEditorProps) {
 
   // 监听其他用户的更新
   useEffect(() => {
-    const handlePatch = (data: any) => {
+    const handlePatch = (data: {
+      module: string;
+      userId: string;
+      delta: string;
+    }) => {
       if (data.module === 'world') {
         console.log('Received world update from user:', data.userId);
         setContent(data.delta);

@@ -302,29 +302,41 @@ export async function appendKnowledgeChatMessages(
 
   const sanitized = messages
     .map((message) => ({
-      id: message.id,
+      id: typeof message.id === 'string' ? message.id : undefined,
       role: message.role,
       content: message.content.trim(),
     }))
-    .filter((message) => message.content.length > 0);
+    .filter((message) => Boolean(message.id) && message.content.length > 0) as Array<{
+    id: string;
+    role: 'user' | 'assistant';
+    content: string;
+  }>;
 
   if (!sanitized.length) {
     return;
   }
 
-  await prisma.knowledgeChatMessage.createMany({
-    data: sanitized.map((message) => ({
-      id: message.id,
-      sessionId,
-      role: message.role,
-      content: message.content,
-    })),
-    skipDuplicates: true,
-  });
+  await prisma.$transaction(async (tx) => {
+    for (const message of sanitized) {
+      await tx.knowledgeChatMessage.upsert({
+        where: { id: message.id },
+        update: {
+          role: message.role,
+          content: message.content,
+        },
+        create: {
+          id: message.id,
+          sessionId,
+          role: message.role,
+          content: message.content,
+        },
+      });
+    }
 
-  await prisma.knowledgeChatSession.update({
-    where: { id: sessionId },
-    data: { updatedAt: new Date() },
+    await tx.knowledgeChatSession.update({
+      where: { id: sessionId },
+      data: { updatedAt: new Date() },
+    });
   });
 }
 

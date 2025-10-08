@@ -205,9 +205,14 @@ export function KnowledgeBaseTab({ projectId }: KnowledgeBaseTabProps) {
       }
 
       const payload = candidates
-        .filter((candidate) => shouldPersistMessage(candidate))
+        .filter(
+          (candidate) =>
+            typeof candidate.id === 'string' &&
+            candidate.id.length > 0 &&
+            shouldPersistMessage(candidate)
+        )
         .map((candidate) => ({
-          id: candidate.id,
+          id: candidate.id as string,
           role: candidate.role as 'user' | 'assistant',
           content: extractTextFromMessage(candidate).trim(),
         }))

@@ -48,7 +48,21 @@ export async function POST(
       });
     }
 
-    const extractText = (message: any): string => {
+    type ChatMessage = {
+      role: string;
+      content?: string;
+      parts?: Array<{
+        type: string;
+        text?: string;
+      }>;
+    };
+
+    type MessagePart = {
+      type: string;
+      text?: string;
+    };
+
+    const extractText = (message: ChatMessage | undefined): string => {
       if (!message) return '';
 
       if (typeof message.content === 'string') {
@@ -57,8 +71,8 @@ export async function POST(
 
       if (Array.isArray(message.parts)) {
         return message.parts
-          .filter((part: any) => part && part.type === 'text' && typeof part.text === 'string')
-          .map((part: any) => part.text)
+          .filter((part: MessagePart) => part && part.type === 'text' && typeof part.text === 'string')
+          .map((part: MessagePart) => part.text as string)
           .join('\n');
       }
 

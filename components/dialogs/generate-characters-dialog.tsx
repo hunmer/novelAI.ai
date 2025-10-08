@@ -122,7 +122,7 @@ export function GenerateCharactersDialog({
   open,
   onOpenChange,
   worldContext,
-  projectId,
+  projectId: _projectId,
   onConfirm,
 }: GenerateCharactersDialogProps) {
   const [prompt, setPrompt] = useState('');
@@ -174,10 +174,11 @@ export function GenerateCharactersDialog({
         await logger.logSnippet('角色列表生成完成', snippetId, 'character-dialog');
         await logger.endSnippet(snippetId);
       }
-    } catch (error) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : '未知错误';
       if (snippetId) {
         await logger.logSnippet(
-          `生成失败: ${error instanceof Error ? error.message : '未知错误'}`,
+          `生成失败: ${errorMessage}`,
           snippetId,
           'character-dialog',
           { level: 'error' }
@@ -186,7 +187,7 @@ export function GenerateCharactersDialog({
       }
 
       await logger.error(
-        `角色生成失败: ${error instanceof Error ? error.message : '未知错误'}`,
+        `角色生成失败: ${errorMessage}`,
         'character-dialog'
       );
     } finally {

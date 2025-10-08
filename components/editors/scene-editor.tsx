@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -38,7 +39,7 @@ export function SceneEditor({ projectId, worldContext }: SceneEditorProps) {
 
   useEffect(() => {
     loadScenes();
-  }, [projectId]);
+  }, [projectId, loadScenes]);
 
   const loadScenes = async () => {
     try {
@@ -201,9 +202,11 @@ export function SceneEditor({ projectId, worldContext }: SceneEditorProps) {
               <div className="flex items-center gap-3">
                 <div className="h-12 w-12 overflow-hidden rounded-md border bg-muted">
                   {scene.backgroundImage ? (
-                    <img
+                    <Image
                       src={scene.backgroundThumbnail || scene.backgroundImage}
                       alt={`${scene.name} 缩略图`}
+                      width={48}
+                      height={48}
                       className="h-full w-full object-cover"
                     />
                   ) : (

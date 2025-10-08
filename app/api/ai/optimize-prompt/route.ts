@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       });
-    } catch (parseError) {
+    } catch {
       // 如果解析失败，尝试提取JSON部分
       const jsonMatch = result.text.match(/\{[\s\S]*\}/);
       if (jsonMatch) {

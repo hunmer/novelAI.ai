@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -34,7 +35,7 @@ export function CharacterEditor({ projectId, worldContext }: CharacterEditorProp
 
   useEffect(() => {
     loadCharacters();
-  }, [projectId]);
+  }, [projectId, loadCharacters]);
 
   const loadCharacters = async () => {
     const data = await getCharacters(projectId);
@@ -180,9 +181,11 @@ export function CharacterEditor({ projectId, worldContext }: CharacterEditorProp
               >
                 <div className="flex items-center gap-3">
                   {thumbnail ? (
-                    <img
+                    <Image
                       src={thumbnail}
                       alt={`${char.name ?? '角色'}插画`}
+                      width={48}
+                      height={48}
                       className="h-12 w-12 rounded-md object-cover"
                     />
                   ) : (

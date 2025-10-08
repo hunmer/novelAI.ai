@@ -9,6 +9,10 @@ import { VersionDiff } from '@/components/project/version-diff';
 import type { Version } from '@prisma/client';
 import { ClockIcon, RotateCcwIcon, EyeIcon, ChevronDown, ChevronUp } from 'lucide-react';
 
+interface VersionMetadata {
+  prompt?: string;
+}
+
 interface WorldVersionRollbackProps {
   projectId: string;
   currentContent: string;
@@ -116,7 +120,7 @@ export function WorldVersionRollback({
 
                     {version.metadata && (
                       <p className="text-xs text-muted-foreground line-clamp-2">
-                        提示词: {(version.metadata as any)?.prompt || '无'}
+                        提示词: {(version.metadata as VersionMetadata)?.prompt || '无'}
                       </p>
                     )}
                   </div>

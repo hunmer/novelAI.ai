@@ -169,10 +169,15 @@ function headersListToObject(items: KeyValueItem[]): Record<string, string> {
   return result;
 }
 
+interface ProviderMetadata {
+  headers?: Record<string, string>;
+  [key: string]: unknown;
+}
+
 function mergeMetadataWithHeaders(
-  base: Record<string, any> | undefined,
+  base: ProviderMetadata | undefined,
   headers: Record<string, string>
-): Record<string, any> {
+): ProviderMetadata {
   const metadata = base ? { ...base } : {};
 
   if (Object.keys(headers).length) {
@@ -389,7 +394,7 @@ interface ProviderModelForm {
   description?: string;
   capabilities: ModelCapability[];
   defaultFor: ModelCapability[];
-  metadata?: Record<string, any>;
+  metadata?: ProviderMetadata;
   headers?: KeyValueItem[];
 }
 
@@ -402,7 +407,7 @@ interface ModelProvider {
   models: ProviderModelForm[];
   isDefault: boolean;
   isActive: boolean;
-  metadata: Record<string, any>;
+  metadata: ProviderMetadata;
   headers: KeyValueItem[];
 }
 
@@ -413,7 +418,7 @@ interface ProviderFormState {
   baseUrl: string;
   models: ProviderModelForm[];
   isDefault: boolean;
-  metadata?: Record<string, any>;
+  metadata?: ProviderMetadata;
   headers: KeyValueItem[];
 }
 
@@ -506,7 +511,26 @@ export function ModelProviderSettings() {
     try {
       const res = await fetch('/api/models?includeInactive=true');
       const data = await res.json();
-      const nextProviders: ModelProvider[] = (data.providers || []).map((provider: any) => {
+      interface RawProvider {
+        id: string;
+        name: string;
+        type: string;
+        apiKey: string;
+        baseUrl?: string;
+        models?: Array<{
+          name: string;
+          label?: string;
+          description?: string;
+          capabilities?: string[];
+          defaultFor?: string[];
+          metadata?: unknown;
+        }>;
+        isDefault: boolean;
+        isActive: boolean;
+        metadata?: unknown;
+      }
+
+      const nextProviders: ModelProvider[] = (data.providers || []).map((provider: RawProvider) => {
         const rawMetadata =
           provider.metadata && typeof provider.metadata === 'object'
             ? (provider.metadata as Record<string, unknown>)
@@ -523,7 +547,7 @@ export function ModelProviderSettings() {
           apiKey: provider.apiKey,
           baseUrl: provider.baseUrl || '',
           models: Array.isArray(provider.models)
-            ? provider.models.map((model: any) => {
+            ? provider.models.map((model) => {
                 const modelMetadata =
                   model.metadata && typeof model.metadata === 'object'
                     ? (model.metadata as Record<string, unknown>)
